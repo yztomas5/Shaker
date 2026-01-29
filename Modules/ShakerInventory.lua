@@ -74,28 +74,6 @@ function ShakerInventory.Add(player, ingredientFolder)
 	return true
 end
 
--- Remover último ingrediente del shaker
-function ShakerInventory.RemoveLast(player)
-	local playerShakers = player:FindFirstChild("Shakers")
-	if not playerShakers then return false end
-
-	local inventory = player:FindFirstChild("Inventory")
-	if not inventory then return false end
-
-	local ingredients = inventory:FindFirstChild("Ingredients")
-	if not ingredients then
-		ingredients = Instance.new("Folder")
-		ingredients.Name = "Ingredients"
-		ingredients.Parent = inventory
-	end
-
-	local ingredientFolder = playerShakers:FindFirstChildOfClass("Folder")
-	if not ingredientFolder then return false end
-
-	ingredientFolder.Parent = ingredients
-	return true
-end
-
 -- Devolver todos los ingredientes al inventario
 function ShakerInventory.ReturnAll(player)
 	local playerShakers = player:FindFirstChild("Shakers")

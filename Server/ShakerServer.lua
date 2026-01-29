@@ -304,12 +304,6 @@ local function handleShakerClick(player, plotNumber)
 			print("[ShakerServer] No se encontró ingrediente en inventario")
 		end
 	end
-
-	-- Remover ingrediente (click sin herramienta, no mezclando)
-	if not tool and count > 0 and not isActive then
-		print("[ShakerServer] Removiendo ingrediente")
-		Inventory.RemoveLast(player)
-	end
 end
 
 -- Escuchar evento de click del cliente
