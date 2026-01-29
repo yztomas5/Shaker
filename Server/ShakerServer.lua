@@ -57,6 +57,9 @@ local CompleteMixingEvent = getOrCreateEvent("CompleteMixing")
 local ShakerClickEvent = getOrCreateEvent("ShakerClick")
 local TouchPartClickEvent = getOrCreateEvent("TouchPartClick")
 local CancelMixingEvent = getOrCreateEvent("CancelMixing")
+local IngredientAddedEvent = getOrCreateEvent("IngredientAdded")
+local IngredientRemovedEvent = getOrCreateEvent("IngredientRemoved")
+local EnergizingAddedEvent = getOrCreateEvent("EnergizingAdded")
 
 local warningEvent = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Warn"):WaitForChild("Warning")
 
@@ -282,6 +285,7 @@ local function handleShakerClick(player, plotNumber)
 
 				updateBillboard(player, data.currentXp, data.requiredXp, true)
 				UpdateProgressEvent:FireClient(player, data.currentXp, data.requiredXp)
+				EnergizingAddedEvent:FireClient(player, xpToAdd)
 
 				-- Verificar si se completó
 				if data.currentXp >= data.requiredXp then
@@ -300,6 +304,7 @@ local function handleShakerClick(player, plotNumber)
 			print("[ShakerServer] Añadiendo ingrediente:", tool.Name)
 			tool:Destroy()
 			Inventory.Add(player, ingredient)
+			IngredientAddedEvent:FireClient(player)
 			startMixing(player)
 			return
 		else

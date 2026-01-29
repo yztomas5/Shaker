@@ -18,6 +18,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local SoundService = game:GetService("SoundService")
 
 local Trove = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Data"):WaitForChild("Trove"))
 local ShakerButton = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utils"):WaitForChild("ShakerSystem"):WaitForChild("ShakerButton"))
@@ -36,6 +37,17 @@ local CompleteMixingEvent = shakersFolder:WaitForChild("CompleteMixing")
 local ShakerClickEvent = shakersFolder:WaitForChild("ShakerClick")
 local TouchPartClickEvent = shakersFolder:WaitForChild("TouchPartClick")
 local CancelMixingEvent = shakersFolder:WaitForChild("CancelMixing")
+local IngredientAddedEvent = shakersFolder:WaitForChild("IngredientAdded")
+local IngredientRemovedEvent = shakersFolder:WaitForChild("IngredientRemoved")
+local EnergizingAddedEvent = shakersFolder:WaitForChild("EnergizingAdded")
+
+-- IDs de sonidos
+local SOUNDS = {
+	ADD_INGREDIENT = "rbxassetid://9119713951",
+	REMOVE_INGREDIENT = "rbxassetid://9119720149",
+	ADD_ENERGIZING = "rbxassetid://9119713951",
+	COMPLETE_MIXING = "rbxassetid://9125645146"
+}
 
 -- GUI de Warning
 local warnGui = player:WaitForChild("PlayerGui"):WaitForChild("Warn")
@@ -58,6 +70,17 @@ local CurrentHoveredModel = nil
 ------------------------------------------------------------------------
 -- UTILIDADES
 ------------------------------------------------------------------------
+
+local function playSound(soundId, volume)
+	local sound = Instance.new("Sound")
+	sound.SoundId = soundId
+	sound.Volume = volume or 0.5
+	sound.Parent = SoundService
+	sound:Play()
+	sound.Ended:Connect(function()
+		sound:Destroy()
+	end)
+end
 
 local function getCurrentPlotNumber()
 	local currentPlot = player:FindFirstChild("CurrentPlot")
@@ -352,14 +375,87 @@ end)
 
 StopMixingEvent.OnClientEvent:Connect(function()
 	stopEffects()
+	playSound(SOUNDS.REMOVE_INGREDIENT, 0.5)
 end)
 
 CompleteMixingEvent.OnClientEvent:Connect(function(mixedColor)
-	stopEffects()
+	playSound(SOUNDS.COMPLETE_MIXING, 0.7)
 
+	-- Detener efectos pero no borrar partes aún
+	if ActiveEffects.connection then
+		ActiveEffects.connection:Disconnect()
+	end
+	ActiveEffects.active = false
+
+	-- Encoger partes antes de destruirlas
 	local contentPart = getContentPart()
 	if contentPart then
-		clearContent(contentPart)
+		for _, child in ipairs(contentPart:GetChildren()) do
+			if child:IsA("BasePart") and child.Name:find("Layer_") then
+				local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+				local tween = TweenService:Create(child, tweenInfo, {
+					Size = Vector3.new(0.01, 0.01, 0.01)
+				})
+				tween.Completed:Connect(function()
+					child:Destroy()
+				end)
+				tween:Play()
+			end
+		end
+	end
+
+	ActiveEffects = {}
+end)
+
+-- Sonido al añadir ingrediente
+IngredientAddedEvent.OnClientEvent:Connect(function()
+	playSound(SOUNDS.ADD_INGREDIENT, 0.5)
+end)
+
+-- Sonido al remover ingrediente
+IngredientRemovedEvent.OnClientEvent:Connect(function()
+	playSound(SOUNDS.REMOVE_INGREDIENT, 0.5)
+end)
+
+-- Efecto de energizante añadido
+EnergizingAddedEvent.OnClientEvent:Connect(function(xpAdded)
+	playSound(SOUNDS.ADD_ENERGIZING, 0.6)
+
+	-- Efecto visual: flash en las partes
+	if ActiveEffects.parts then
+		for _, part in ipairs(ActiveEffects.parts) do
+			if part.Parent then
+				local originalColor = part.Color
+				local flashColor = Color3.fromRGB(255, 255, 150)
+
+				-- Flash amarillo
+				local flashTween = TweenService:Create(part, TweenInfo.new(0.1), {
+					Color = flashColor
+				})
+				flashTween:Play()
+				flashTween.Completed:Connect(function()
+					-- Volver al color original
+					local returnTween = TweenService:Create(part, TweenInfo.new(0.3), {
+						Color = originalColor
+					})
+					returnTween:Play()
+				end)
+
+				-- Efecto de escala
+				local originalSize = part.Size
+				local bigSize = originalSize * 1.2
+				local scaleTween = TweenService:Create(part, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+					Size = bigSize
+				})
+				scaleTween:Play()
+				scaleTween.Completed:Connect(function()
+					local returnScale = TweenService:Create(part, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+						Size = originalSize
+					})
+					returnScale:Play()
+				end)
+			end
+		end
 	end
 end)
 
