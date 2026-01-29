@@ -5,7 +5,6 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
 
 local Trove = require(ReplicatedStorage.Modules.Data.Trove)
 
@@ -19,7 +18,6 @@ local shakerVFXFolder = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("V
 local addIngredientSound = shakerSFXFolder:WaitForChild("AddIngredient")
 local removeIngredientSound = shakerSFXFolder:WaitForChild("Remove")
 local bubblesSound = shakerSFXFolder:WaitForChild("Bubbles")
-local pourSFX = shakerSFXFolder:WaitForChild("PourSFX")
 
 local energizingSound = shakerSFXFolder:FindFirstChild("Energizing")
 local midEnergizingSound = shakerSFXFolder:FindFirstChild("MidEnergizing")
@@ -27,7 +25,6 @@ local bigEnergizingSound = shakerSFXFolder:FindFirstChild("BigEnergizing")
 
 -- VFX
 local bubblesVFX = shakerVFXFolder:WaitForChild("Bubbles")
-local pourVFX = shakerVFXFolder:WaitForChild("PourVFX")
 
 local energizingVFX = shakerVFXFolder:FindFirstChild("Energizing")
 local midEnergizingVFX = shakerVFXFolder:FindFirstChild("MidEnergizing")
@@ -50,14 +47,6 @@ function ShakerEffects.MixColors(colors)
 	end
 
 	return Color3.new(r / #colors, g / #colors, b / #colors)
-end
-
-function ShakerEffects.ApplyColorToParticles(parent, color)
-	for _, child in ipairs(parent:GetDescendants()) do
-		if child:IsA("ParticleEmitter") then
-			child.Color = ColorSequence.new(color)
-		end
-	end
 end
 
 ------------------------------------------------------------------------
@@ -396,71 +385,6 @@ function ShakerEffects.StopShakeEffects(soundClone, contentPart)
 			end
 		end)
 	end
-end
-
-------------------------------------------------------------------------
--- EFECTO DE VERTIR (COMPLETADO)
-------------------------------------------------------------------------
-
-function ShakerEffects.PlayPourEffect(pourPart, mixedColor)
-	if not pourPart then return end
-
-	local trove = Trove.new()
-
-	local pourVFXClone = pourVFX:Clone()
-	pourVFXClone.CFrame = pourPart.CFrame
-	pourVFXClone.Parent = pourPart.Parent
-	trove:Add(pourVFXClone)
-
-	ShakerEffects.ApplyColorToParticles(pourVFXClone, mixedColor)
-
-	local pourSound = pourSFX:Clone()
-	pourSound.Parent = pourPart
-	trove:Add(pourSound)
-
-	local particles = {}
-	for _, d in ipairs(pourVFXClone:GetDescendants()) do
-		if d:IsA("ParticleEmitter") then
-			d.Enabled = false
-			table.insert(particles, d)
-		end
-	end
-
-	pourSound:Play()
-
-	task.wait()
-
-	for _, p in ipairs(particles) do
-		if p and p.Parent then
-			p.Enabled = true
-		end
-	end
-
-	local emitConnection
-	emitConnection = trove:Connect(RunService.Heartbeat, function()
-		if pourSound.IsPlaying then
-			for _, p in ipairs(particles) do
-				if p and p.Parent and p.Enabled then
-					p:Emit(2)
-				end
-			end
-		else
-			if emitConnection then
-				emitConnection:Disconnect()
-			end
-		end
-	end)
-
-	trove:Connect(pourSound.Ended, function()
-		for _, p in ipairs(particles) do
-			if p and p.Parent then
-				p.Enabled = false
-			end
-		end
-
-		task.wait(2.5)
-		trove:Destroy()
-	end)
 end
 
 return ShakerEffects
