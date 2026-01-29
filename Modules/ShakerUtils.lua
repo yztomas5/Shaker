@@ -1,6 +1,7 @@
 --[[
 	ShakerUtils - Utilidades compartidas del sistema de Shakers
 	Formateo de XP, mezcla de colores, helpers
+	Solo hay UN shaker por plot - el folder Shakers ES el shaker
 ]]
 
 local Workspace = game:GetService("Workspace")
@@ -49,8 +50,8 @@ function ShakerUtils.MixColors(colors)
 	return Color3.new(r / #colors, g / #colors, b / #colors)
 end
 
--- Obtener folder de shaker del plot
-function ShakerUtils.GetShakerFolder(player, shakerNumber)
+-- Obtener folder de shaker del plot (ES el folder Shakers directamente)
+function ShakerUtils.GetShakerFolder(player)
 	local currentPlot = player:FindFirstChild("CurrentPlot")
 	if not currentPlot or currentPlot.Value == "" then
 		return nil
@@ -62,15 +63,12 @@ function ShakerUtils.GetShakerFolder(player, shakerNumber)
 	local plotFolder = plotsFolder:FindFirstChild(currentPlot.Value)
 	if not plotFolder then return nil end
 
-	local shakersRoot = plotFolder:FindFirstChild("Shakers")
-	if not shakersRoot then return nil end
-
-	return shakersRoot:FindFirstChild(tostring(shakerNumber))
+	return plotFolder:FindFirstChild("Shakers")
 end
 
 -- Obtener BillboardGui del shaker
-function ShakerUtils.GetBillboard(player, shakerNumber)
-	local shakerFolder = ShakerUtils.GetShakerFolder(player, shakerNumber)
+function ShakerUtils.GetBillboard(player)
+	local shakerFolder = ShakerUtils.GetShakerFolder(player)
 	if not shakerFolder then return nil end
 
 	local infoFolder = shakerFolder:FindFirstChild("Info")
@@ -80,8 +78,8 @@ function ShakerUtils.GetBillboard(player, shakerNumber)
 end
 
 -- Obtener Content part para ingredientes visuales
-function ShakerUtils.GetContentPart(player, shakerNumber)
-	local shakerFolder = ShakerUtils.GetShakerFolder(player, shakerNumber)
+function ShakerUtils.GetContentPart(player)
+	local shakerFolder = ShakerUtils.GetShakerFolder(player)
 	if not shakerFolder then return nil end
 
 	local ingredientsFolder = shakerFolder:FindFirstChild("Ingredients")

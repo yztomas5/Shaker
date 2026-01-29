@@ -1,5 +1,6 @@
 --[[
 	ShakerData - Persistencia de datos de shakers
+	Solo hay un shaker - guarda ingredientes directamente en player.Shakers
 	Guarda: ingredientes + XP actual/requerida
 ]]
 
@@ -75,32 +76,24 @@ function ShakerData.Save(player, activeShakes)
 	if not playerShakers then return end
 
 	profile.Data.Shakers = profile.Data.Shakers or {}
-	profile.Data.Shakers.ShakerContents = {}
-	profile.Data.Shakers.ActiveShakes = {}
+	profile.Data.Shakers.Ingredients = {}
+	profile.Data.Shakers.CurrentXp = 0
+	profile.Data.Shakers.RequiredXp = 0
 
-	-- Guardar contenido de shakers
-	for _, shakerFolder in ipairs(playerShakers:GetChildren()) do
-		if shakerFolder:IsA("Folder") then
-			local shakerNumber = shakerFolder.Name
-			profile.Data.Shakers.ShakerContents[shakerNumber] = {}
-
-			for _, child in ipairs(shakerFolder:GetChildren()) do
-				if child:IsA("Folder") then
-					table.insert(profile.Data.Shakers.ShakerContents[shakerNumber], serializeFolder(child))
-				end
-			end
+	-- Guardar ingredientes (están directamente en player.Shakers)
+	for _, child in ipairs(playerShakers:GetChildren()) do
+		if child:IsA("Folder") then
+			table.insert(profile.Data.Shakers.Ingredients, serializeFolder(child))
 		end
 	end
 
-	-- Guardar mezclas activas
+	-- Guardar mezcla activa
 	if activeShakes then
-		for shakeKey, shakeData in pairs(activeShakes) do
-			if shakeData.player == player then
-				profile.Data.Shakers.ActiveShakes[tostring(shakeData.shakerNumber)] = {
-					CurrentXp = shakeData.currentXp,
-					RequiredXp = shakeData.requiredXp
-				}
-			end
+		local key = player.UserId
+		local shakeData = activeShakes[key]
+		if shakeData then
+			profile.Data.Shakers.CurrentXp = shakeData.currentXp
+			profile.Data.Shakers.RequiredXp = shakeData.requiredXp
 		end
 	end
 end
@@ -118,27 +111,27 @@ function ShakerData.Load(player)
 		playerShakers.Parent = player
 	end
 
-	-- Cargar contenido de shakers
-	if profile.Data.Shakers.ShakerContents then
-		for shakerNumber, contents in pairs(profile.Data.Shakers.ShakerContents) do
-			local shakerFolder = playerShakers:FindFirstChild(shakerNumber)
-			if not shakerFolder then
-				shakerFolder = Instance.new("Folder")
-				shakerFolder.Name = shakerNumber
-				shakerFolder.Parent = playerShakers
-			else
-				shakerFolder:ClearAllChildren()
-			end
+	-- Limpiar contenido actual
+	for _, child in ipairs(playerShakers:GetChildren()) do
+		if child:IsA("Folder") then
+			child:Destroy()
+		end
+	end
 
-			for _, childData in ipairs(contents) do
-				if childData.ClassName == "Folder" then
-					deserializeFolder(childData, shakerFolder)
-				end
+	-- Cargar ingredientes
+	if profile.Data.Shakers.Ingredients then
+		for _, childData in ipairs(profile.Data.Shakers.Ingredients) do
+			if childData.ClassName == "Folder" then
+				deserializeFolder(childData, playerShakers)
 			end
 		end
 	end
 
-	return profile.Data.Shakers.ActiveShakes
+	-- Devolver datos de mezcla activa
+	return {
+		CurrentXp = profile.Data.Shakers.CurrentXp or 0,
+		RequiredXp = profile.Data.Shakers.RequiredXp or 0
+	}
 end
 
 -- Asegurar folder de shakers existe

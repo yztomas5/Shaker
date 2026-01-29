@@ -1,20 +1,17 @@
 --[[
 	ShakerInventory - Manejo de ingredientes en shakers
-	Añadir, remover, contar ingredientes
+	Solo hay un shaker por plot, los ingredientes van directo en player.Shakers
 ]]
 
 local ShakerInventory = {}
 
--- Obtener folders de ingredientes en un shaker
-function ShakerInventory.GetIngredients(player, shakerNumber)
+-- Obtener folders de ingredientes en el shaker
+function ShakerInventory.GetIngredients(player)
 	local playerShakers = player:FindFirstChild("Shakers")
 	if not playerShakers then return {} end
 
-	local shakerFolder = playerShakers:FindFirstChild(tostring(shakerNumber))
-	if not shakerFolder then return {} end
-
 	local folders = {}
-	for _, child in ipairs(shakerFolder:GetChildren()) do
+	for _, child in ipairs(playerShakers:GetChildren()) do
 		if child:IsA("Folder") then
 			table.insert(folders, child)
 		end
@@ -23,8 +20,8 @@ function ShakerInventory.GetIngredients(player, shakerNumber)
 end
 
 -- Contar ingredientes
-function ShakerInventory.Count(player, shakerNumber)
-	return #ShakerInventory.GetIngredients(player, shakerNumber)
+function ShakerInventory.Count(player)
+	return #ShakerInventory.GetIngredients(player)
 end
 
 -- Buscar ingrediente en inventario del jugador
@@ -66,27 +63,21 @@ function ShakerInventory.FindGear(player, name, id)
 end
 
 -- Añadir ingrediente al shaker
-function ShakerInventory.Add(player, shakerNumber, ingredientFolder)
+function ShakerInventory.Add(player, ingredientFolder)
 	local playerShakers = player:FindFirstChild("Shakers")
 	if not playerShakers then return false end
-
-	local shakerFolder = playerShakers:FindFirstChild(tostring(shakerNumber))
-	if not shakerFolder then return false end
 
 	local idValue = ingredientFolder:FindFirstChild("Id")
 	if idValue then idValue:Destroy() end
 
-	ingredientFolder.Parent = shakerFolder
+	ingredientFolder.Parent = playerShakers
 	return true
 end
 
 -- Remover último ingrediente del shaker
-function ShakerInventory.RemoveLast(player, shakerNumber)
+function ShakerInventory.RemoveLast(player)
 	local playerShakers = player:FindFirstChild("Shakers")
 	if not playerShakers then return false end
-
-	local shakerFolder = playerShakers:FindFirstChild(tostring(shakerNumber))
-	if not shakerFolder then return false end
 
 	local inventory = player:FindFirstChild("Inventory")
 	if not inventory then return false end
@@ -98,7 +89,7 @@ function ShakerInventory.RemoveLast(player, shakerNumber)
 		ingredients.Parent = inventory
 	end
 
-	local ingredientFolder = shakerFolder:FindFirstChildOfClass("Folder")
+	local ingredientFolder = playerShakers:FindFirstChildOfClass("Folder")
 	if not ingredientFolder then return false end
 
 	ingredientFolder.Parent = ingredients
@@ -106,12 +97,9 @@ function ShakerInventory.RemoveLast(player, shakerNumber)
 end
 
 -- Devolver todos los ingredientes al inventario
-function ShakerInventory.ReturnAll(player, shakerNumber)
+function ShakerInventory.ReturnAll(player)
 	local playerShakers = player:FindFirstChild("Shakers")
 	if not playerShakers then return false end
-
-	local shakerFolder = playerShakers:FindFirstChild(tostring(shakerNumber))
-	if not shakerFolder then return false end
 
 	local inventory = player:FindFirstChild("Inventory")
 	if not inventory then return false end
@@ -123,7 +111,7 @@ function ShakerInventory.ReturnAll(player, shakerNumber)
 		ingredients.Parent = inventory
 	end
 
-	for _, child in ipairs(shakerFolder:GetChildren()) do
+	for _, child in ipairs(playerShakers:GetChildren()) do
 		if child:IsA("Folder") then
 			child.Parent = ingredients
 		end
@@ -132,14 +120,11 @@ function ShakerInventory.ReturnAll(player, shakerNumber)
 end
 
 -- Limpiar todos los ingredientes (para cuando se crea jugo)
-function ShakerInventory.Clear(player, shakerNumber)
+function ShakerInventory.Clear(player)
 	local playerShakers = player:FindFirstChild("Shakers")
 	if not playerShakers then return end
 
-	local shakerFolder = playerShakers:FindFirstChild(tostring(shakerNumber))
-	if not shakerFolder then return end
-
-	for _, child in ipairs(shakerFolder:GetChildren()) do
+	for _, child in ipairs(playerShakers:GetChildren()) do
 		if child:IsA("Folder") then
 			child:Destroy()
 		end

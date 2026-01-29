@@ -3,6 +3,13 @@
 	- Click en modelo del shaker para añadir ingredientes
 	- Highlight cuando tiene ingrediente en mano
 	- Efectos visuales de mezcla (gelatina)
+
+	Estructura:
+	Plots/{PlotNumber}/Shakers/  <-- El shaker
+		├── Ingredients/Content
+		├── Model/{ModelName}
+		├── Info
+		└── TouchPart
 ]]
 
 local Players = game:GetService("Players")
@@ -17,8 +24,6 @@ local player = Players.LocalPlayer
 local mouse = player:GetMouse()
 local plotsFolder = Workspace:WaitForChild("Plots")
 
-print("[ShakerClient] Esperando eventos...")
-
 -- Esperar eventos
 local shakersFolder = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Shakers")
 local StartMixingEvent = shakersFolder:WaitForChild("StartMixing")
@@ -27,17 +32,13 @@ local UpdateProgressEvent = shakersFolder:WaitForChild("UpdateProgress")
 local CompleteMixingEvent = shakersFolder:WaitForChild("CompleteMixing")
 local ShakerClickEvent = shakersFolder:WaitForChild("ShakerClick")
 
-print("[ShakerClient] Eventos encontrados")
-
 -- Config de ingredientes
 local IngredientConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("IngredientConfig"))
 
-print("[ShakerClient] Config cargada")
-
 -- Estado
-local ActiveEffects = {} -- [shakerNumber] = {parts, connection, mixedColor}
+local ActiveEffects = {}
 local CurrentHighlight = nil
-local CurrentHoveredShaker = nil
+local CurrentHoveredModel = nil
 
 ------------------------------------------------------------------------
 -- UTILIDADES
@@ -51,21 +52,18 @@ local function getCurrentPlotNumber()
 	return nil
 end
 
-local function getShakerFolder(shakerNumber)
+local function getShakerFolder()
 	local plotNumber = getCurrentPlotNumber()
 	if not plotNumber then return nil end
 
 	local plotFolder = plotsFolder:FindFirstChild(plotNumber)
 	if not plotFolder then return nil end
 
-	local shakersRoot = plotFolder:FindFirstChild("Shakers")
-	if not shakersRoot then return nil end
-
-	return shakersRoot:FindFirstChild(tostring(shakerNumber))
+	return plotFolder:FindFirstChild("Shakers")
 end
 
-local function getContentPart(shakerNumber)
-	local shakerFolder = getShakerFolder(shakerNumber)
+local function getContentPart()
+	local shakerFolder = getShakerFolder()
 	if not shakerFolder then return nil end
 
 	local ingredientsFolder = shakerFolder:FindFirstChild("Ingredients")
@@ -74,15 +72,28 @@ local function getContentPart(shakerNumber)
 	return ingredientsFolder:FindFirstChild("Content")
 end
 
-local function getIngredientNames(shakerNumber)
+local function getShakerModel()
+	local shakerFolder = getShakerFolder()
+	if not shakerFolder then return nil end
+
+	local modelFolder = shakerFolder:FindFirstChild("Model")
+	if not modelFolder then return nil end
+
+	-- Buscar el primer Model dentro de Model folder
+	for _, child in ipairs(modelFolder:GetChildren()) do
+		if child:IsA("Model") then
+			return child
+		end
+	end
+	return nil
+end
+
+local function getIngredientNames()
 	local playerShakers = player:FindFirstChild("Shakers")
 	if not playerShakers then return {} end
 
-	local shakerFolder = playerShakers:FindFirstChild(tostring(shakerNumber))
-	if not shakerFolder then return {} end
-
 	local names = {}
-	for _, folder in ipairs(shakerFolder:GetChildren()) do
+	for _, folder in ipairs(playerShakers:GetChildren()) do
 		if folder:IsA("Folder") then
 			table.insert(names, folder.Name)
 		end
@@ -102,42 +113,19 @@ local function isIngredientTool(tool)
 	return typeValue and typeValue:IsA("StringValue") and typeValue.Value == "Ingredient"
 end
 
--- Buscar shaker desde una parte clickeada
--- Busca hacia arriba en la jerarquía hasta encontrar un folder de shaker numerado
-local function findShakerFromPart(part)
-	local plotNumber = getCurrentPlotNumber()
-	if not plotNumber then return nil, nil end
+-- Verificar si una parte pertenece al shaker
+local function isPartOfShaker(part)
+	local shakerFolder = getShakerFolder()
+	if not shakerFolder then return false end
 
-	local plotFolder = plotsFolder:FindFirstChild(plotNumber)
-	if not plotFolder then return nil, nil end
-
-	local shakersRoot = plotFolder:FindFirstChild("Shakers")
-	if not shakersRoot then return nil, nil end
-
-	-- Buscar hacia arriba hasta encontrar algo que sea hijo de un shaker
 	local current = part
 	while current and current ~= Workspace do
-		local parent = current.Parent
-		if parent then
-			-- Verificar si el parent es un shaker folder (hijo directo de shakersRoot)
-			if parent.Parent == shakersRoot then
-				local shakerNum = tonumber(parent.Name)
-				if shakerNum then
-					return shakerNum, parent
-				end
-			end
-			-- Verificar si el parent es shakersRoot y current es un shaker folder
-			if parent == shakersRoot then
-				local shakerNum = tonumber(current.Name)
-				if shakerNum then
-					return shakerNum, current
-				end
-			end
+		if current == shakerFolder then
+			return true
 		end
-		current = parent
+		current = current.Parent
 	end
-
-	return nil, nil
+	return false
 end
 
 ------------------------------------------------------------------------
@@ -149,25 +137,17 @@ local function clearHighlight()
 		CurrentHighlight:Destroy()
 		CurrentHighlight = nil
 	end
-	CurrentHoveredShaker = nil
+	CurrentHoveredModel = nil
 end
 
-local function applyHighlight(shakerFolder)
-	if CurrentHoveredShaker == shakerFolder then return end
+local function applyHighlight()
+	local model = getShakerModel()
+	if not model then return end
+
+	if CurrentHoveredModel == model then return end
 
 	clearHighlight()
-	CurrentHoveredShaker = shakerFolder
-
-	-- Buscar el modelo dentro del folder Model
-	local modelFolder = shakerFolder:FindFirstChild("Model")
-	if not modelFolder then return end
-
-	local model = modelFolder:FindFirstChildOfClass("Model")
-	if not model then
-		-- Si no hay Model, buscar cualquier BasePart
-		model = modelFolder:FindFirstChildOfClass("BasePart")
-	end
-	if not model then return end
+	CurrentHoveredModel = model
 
 	local highlight = Instance.new("Highlight")
 	highlight.Name = "ShakerHighlight"
@@ -244,12 +224,12 @@ local function createJuiceParts(contentPart, ingredientNames, mixedColor)
 	return parts
 end
 
-local function startJellyEffect(shakerNumber, parts, mixedColor)
+local function startJellyEffect(parts, mixedColor)
 	if #parts == 0 then return end
 
 	for _, part in ipairs(parts) do
 		task.spawn(function()
-			while ActiveEffects[shakerNumber] and part.Parent do
+			while ActiveEffects.active and part.Parent do
 				local variation = -0.25 + math.random() * 0.3
 				local newColor
 				if variation > 0 then
@@ -301,17 +281,16 @@ local function startJellyEffect(shakerNumber, parts, mixedColor)
 	return connection
 end
 
-local function stopEffects(shakerNumber)
-	local effectData = ActiveEffects[shakerNumber]
-	if not effectData then return end
+local function stopEffects()
+	if not ActiveEffects.active then return end
 
-	if effectData.connection then
-		effectData.connection:Disconnect()
+	if ActiveEffects.connection then
+		ActiveEffects.connection:Disconnect()
 	end
 
-	local contentPart = getContentPart(shakerNumber)
+	local contentPart = getContentPart()
 	if contentPart then
-		for _, part in ipairs(effectData.parts or {}) do
+		for _, part in ipairs(ActiveEffects.parts or {}) do
 			if part.Parent then
 				local tween = TweenService:Create(part, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
 					Size = part.Size * 0.01
@@ -324,53 +303,52 @@ local function stopEffects(shakerNumber)
 		end
 	end
 
-	ActiveEffects[shakerNumber] = nil
+	ActiveEffects = {}
 end
 
 ------------------------------------------------------------------------
 -- EVENTOS DEL SERVIDOR
 ------------------------------------------------------------------------
 
-StartMixingEvent.OnClientEvent:Connect(function(shakerNumber, mixedColor)
-	print("[ShakerClient] StartMixing recibido:", shakerNumber)
-	stopEffects(shakerNumber)
+StartMixingEvent.OnClientEvent:Connect(function(mixedColor)
+	print("[ShakerClient] StartMixing recibido")
+	stopEffects()
 
-	local contentPart = getContentPart(shakerNumber)
+	local contentPart = getContentPart()
 	if not contentPart then
-		print("[ShakerClient] No se encontró contentPart para shaker:", shakerNumber)
+		print("[ShakerClient] No se encontró contentPart")
 		return
 	end
 
-	local ingredientNames = getIngredientNames(shakerNumber)
+	local ingredientNames = getIngredientNames()
 	if #ingredientNames == 0 then
-		print("[ShakerClient] No hay ingredientes para shaker:", shakerNumber)
+		print("[ShakerClient] No hay ingredientes")
 		return
 	end
 
 	print("[ShakerClient] Creando efectos visuales con", #ingredientNames, "ingredientes")
 	local parts = createJuiceParts(contentPart, ingredientNames, mixedColor)
 
-	ActiveEffects[shakerNumber] = {
+	ActiveEffects = {
+		active = true,
 		parts = parts,
 		mixedColor = mixedColor
 	}
 
-	local connection = startJellyEffect(shakerNumber, parts, mixedColor)
-	if ActiveEffects[shakerNumber] then
-		ActiveEffects[shakerNumber].connection = connection
-	end
+	local connection = startJellyEffect(parts, mixedColor)
+	ActiveEffects.connection = connection
 end)
 
-StopMixingEvent.OnClientEvent:Connect(function(shakerNumber)
-	print("[ShakerClient] StopMixing recibido:", shakerNumber)
-	stopEffects(shakerNumber)
+StopMixingEvent.OnClientEvent:Connect(function()
+	print("[ShakerClient] StopMixing recibido")
+	stopEffects()
 end)
 
-CompleteMixingEvent.OnClientEvent:Connect(function(shakerNumber, mixedColor)
-	print("[ShakerClient] CompleteMixing recibido:", shakerNumber)
-	stopEffects(shakerNumber)
+CompleteMixingEvent.OnClientEvent:Connect(function(mixedColor)
+	print("[ShakerClient] CompleteMixing recibido")
+	stopEffects()
 
-	local contentPart = getContentPart(shakerNumber)
+	local contentPart = getContentPart()
 	if contentPart then
 		clearContent(contentPart)
 	end
@@ -388,13 +366,11 @@ RunService.RenderStepped:Connect(function()
 		return
 	end
 
-	local shakerNum, shakerFolder = findShakerFromPart(target)
-
-	if shakerNum and shakerFolder then
+	if isPartOfShaker(target) then
 		local tool = getEquippedTool()
 		-- Mostrar highlight si tiene ingrediente o energizante en mano
 		if tool and (isIngredientTool(tool) or tool.Name:find("Energizing")) then
-			applyHighlight(shakerFolder)
+			applyHighlight()
 		else
 			clearHighlight()
 		end
@@ -408,14 +384,12 @@ mouse.Button1Down:Connect(function()
 	local target = mouse.Target
 	if not target then return end
 
-	local shakerNum, shakerFolder = findShakerFromPart(target)
 	local plotNumber = getCurrentPlotNumber()
+	if not plotNumber then return end
 
-	print("[ShakerClient] Click detectado - target:", target.Name, "shakerNum:", shakerNum, "plot:", plotNumber)
-
-	if shakerNum and plotNumber then
-		print("[ShakerClient] Enviando click al servidor - shaker:", shakerNum, "plot:", plotNumber)
-		ShakerClickEvent:FireServer(shakerNum, plotNumber)
+	if isPartOfShaker(target) then
+		print("[ShakerClient] Click en shaker detectado, enviando al servidor")
+		ShakerClickEvent:FireServer(plotNumber)
 	end
 end)
 
@@ -423,62 +397,36 @@ end)
 -- SINCRONIZACIÓN CON INGREDIENTES
 ------------------------------------------------------------------------
 
-local function watchShakerFolder(shakerFolder, shakerNumber)
-	local function updateVisuals()
-		local effectData = ActiveEffects[shakerNumber]
-		if not effectData then return end
-
-		local contentPart = getContentPart(shakerNumber)
-		if not contentPart then return end
-
-		local ingredientNames = getIngredientNames(shakerNumber)
-		if #ingredientNames == 0 then
-			stopEffects(shakerNumber)
-			return
-		end
-
-		if effectData.connection then
-			effectData.connection:Disconnect()
-		end
-
-		local parts = createJuiceParts(contentPart, ingredientNames, effectData.mixedColor)
-		effectData.parts = parts
-		effectData.connection = startJellyEffect(shakerNumber, parts, effectData.mixedColor)
-	end
-
-	shakerFolder.ChildAdded:Connect(updateVisuals)
-	shakerFolder.ChildRemoved:Connect(updateVisuals)
-end
-
 local function setupPlayerShakers()
-	print("[ShakerClient] Esperando folder Shakers del jugador...")
 	local playerShakers = player:WaitForChild("Shakers", 10)
 	if not playerShakers then
-		print("[ShakerClient] ERROR: No se encontró folder Shakers después de 10 segundos")
+		print("[ShakerClient] ERROR: No se encontró folder Shakers")
 		return
 	end
 
-	print("[ShakerClient] Folder Shakers encontrado")
+	local function updateVisuals()
+		if not ActiveEffects.active then return end
 
-	for _, shakerFolder in ipairs(playerShakers:GetChildren()) do
-		if shakerFolder:IsA("Folder") then
-			local shakerNumber = tonumber(shakerFolder.Name)
-			if shakerNumber then
-				watchShakerFolder(shakerFolder, shakerNumber)
-				print("[ShakerClient] Observando shaker:", shakerNumber)
-			end
+		local contentPart = getContentPart()
+		if not contentPart then return end
+
+		local ingredientNames = getIngredientNames()
+		if #ingredientNames == 0 then
+			stopEffects()
+			return
 		end
+
+		if ActiveEffects.connection then
+			ActiveEffects.connection:Disconnect()
+		end
+
+		local parts = createJuiceParts(contentPart, ingredientNames, ActiveEffects.mixedColor)
+		ActiveEffects.parts = parts
+		ActiveEffects.connection = startJellyEffect(parts, ActiveEffects.mixedColor)
 	end
 
-	playerShakers.ChildAdded:Connect(function(shakerFolder)
-		if shakerFolder:IsA("Folder") then
-			local shakerNumber = tonumber(shakerFolder.Name)
-			if shakerNumber then
-				watchShakerFolder(shakerFolder, shakerNumber)
-				print("[ShakerClient] Nuevo shaker añadido:", shakerNumber)
-			end
-		end
-	end)
+	playerShakers.ChildAdded:Connect(updateVisuals)
+	playerShakers.ChildRemoved:Connect(updateVisuals)
 end
 
 task.spawn(setupPlayerShakers)
