@@ -16,12 +16,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 -- Módulos
-local Modules = script.Parent.Parent.Modules
-local Config = require(Modules.ShakerConfig)
-local Utils = require(Modules.ShakerUtils)
-local Inventory = require(Modules.ShakerInventory)
-local Juice = require(Modules.ShakerJuice)
-local Data = require(Modules.ShakerData)
+local ShakerSystem = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utils"):WaitForChild("ShakerSystem")
+local Config = require(ShakerSystem.ShakerConfig)
+local Utils = require(ShakerSystem.ShakerUtils)
+local Inventory = require(ShakerSystem.ShakerInventory)
+local Juice = require(ShakerSystem.ShakerJuice)
+local Data = require(ShakerSystem.ShakerData)
 
 local IngredientConfig = require(ReplicatedStorage.Modules.Config.IngredientConfig)
 
