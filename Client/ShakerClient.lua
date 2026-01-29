@@ -2,6 +2,7 @@
 	ShakerClient - LocalScript del cliente
 	- Click en modelo del shaker para añadir ingredientes
 	- Highlight cuando tiene ingrediente en mano
+	- TouchPart con efecto de presionado para añadir XP
 	- Efectos visuales de mezcla (gelatina)
 
 	Estructura:
@@ -18,7 +19,8 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
-print("[ShakerClient] Iniciando...")
+local Trove = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Data"):WaitForChild("Trove"))
+local ShakerButton = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utils"):WaitForChild("ShakerSystem"):WaitForChild("ShakerButton"))
 
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
@@ -37,6 +39,10 @@ local TouchPartClickEvent = shakersFolder:WaitForChild("TouchPartClick")
 local IngredientConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("IngredientConfig"))
 
 -- Estado
+local mainTrove = Trove.new()
+local currentPlotTrove = nil
+local currentTouchPart = nil
+
 local ActiveEffects = {}
 local CurrentHighlight = nil
 local CurrentHoveredModel = nil
@@ -80,7 +86,6 @@ local function getShakerModel()
 	local modelFolder = shakerFolder:FindFirstChild("Model")
 	if not modelFolder then return nil end
 
-	-- Buscar el primer Model dentro de Model folder
 	for _, child in ipairs(modelFolder:GetChildren()) do
 		if child:IsA("Model") then
 			return child
@@ -119,7 +124,6 @@ local function isPartOfShakerModel(part)
 	local shakerFolder = getShakerFolder()
 	if not shakerFolder then return false end
 
-	-- Verificar si es TouchPart
 	local touchPart = shakerFolder:FindFirstChild("TouchPart")
 	if touchPart and (part == touchPart or part:IsDescendantOf(touchPart)) then
 		return false
@@ -135,17 +139,8 @@ local function isPartOfShakerModel(part)
 	return false
 end
 
--- Verificar si una parte es el TouchPart
-local function isTouchPart(part)
-	local shakerFolder = getShakerFolder()
-	if not shakerFolder then return false end
-
-	local touchPart = shakerFolder:FindFirstChild("TouchPart")
-	return touchPart and (part == touchPart or part:IsDescendantOf(touchPart))
-end
-
 ------------------------------------------------------------------------
--- HIGHLIGHT
+-- HIGHLIGHT PARA MODELO (cuando tiene ingrediente)
 ------------------------------------------------------------------------
 
 local function clearHighlight()
@@ -327,22 +322,14 @@ end
 ------------------------------------------------------------------------
 
 StartMixingEvent.OnClientEvent:Connect(function(mixedColor)
-	print("[ShakerClient] StartMixing recibido")
 	stopEffects()
 
 	local contentPart = getContentPart()
-	if not contentPart then
-		print("[ShakerClient] No se encontró contentPart")
-		return
-	end
+	if not contentPart then return end
 
 	local ingredientNames = getIngredientNames()
-	if #ingredientNames == 0 then
-		print("[ShakerClient] No hay ingredientes")
-		return
-	end
+	if #ingredientNames == 0 then return end
 
-	print("[ShakerClient] Creando efectos visuales con", #ingredientNames, "ingredientes")
 	local parts = createJuiceParts(contentPart, ingredientNames, mixedColor)
 
 	ActiveEffects = {
@@ -356,12 +343,10 @@ StartMixingEvent.OnClientEvent:Connect(function(mixedColor)
 end)
 
 StopMixingEvent.OnClientEvent:Connect(function()
-	print("[ShakerClient] StopMixing recibido")
 	stopEffects()
 end)
 
 CompleteMixingEvent.OnClientEvent:Connect(function(mixedColor)
-	print("[ShakerClient] CompleteMixing recibido")
 	stopEffects()
 
 	local contentPart = getContentPart()
@@ -371,11 +356,22 @@ CompleteMixingEvent.OnClientEvent:Connect(function(mixedColor)
 end)
 
 ------------------------------------------------------------------------
--- CLICK Y HOVER
+-- TOUCHPART CLICK (con efecto de presionado)
 ------------------------------------------------------------------------
 
--- Detectar hover para highlight
-RunService.RenderStepped:Connect(function()
+local function onTouchPartClick()
+	local plotNumber = getCurrentPlotNumber()
+	if not plotNumber then return end
+
+	TouchPartClickEvent:FireServer(plotNumber)
+end
+
+------------------------------------------------------------------------
+-- CLICK EN MODELO (para añadir ingredientes)
+------------------------------------------------------------------------
+
+-- Detectar hover para highlight del modelo
+mainTrove:Connect(RunService.RenderStepped, function()
 	local target = mouse.Target
 	if not target then
 		clearHighlight()
@@ -384,7 +380,6 @@ RunService.RenderStepped:Connect(function()
 
 	if isPartOfShakerModel(target) then
 		local tool = getEquippedTool()
-		-- Mostrar highlight si tiene ingrediente o energizante en mano
 		if tool and (isIngredientTool(tool) or tool.Name:find("Energizing")) then
 			applyHighlight()
 		else
@@ -395,19 +390,13 @@ RunService.RenderStepped:Connect(function()
 	end
 end)
 
--- Detectar click
-mouse.Button1Down:Connect(function()
+-- Detectar click en modelo
+mainTrove:Connect(mouse.Button1Down, function()
 	local target = mouse.Target
 	if not target then return end
 
 	local plotNumber = getCurrentPlotNumber()
 	if not plotNumber then return end
-
-	-- Click en TouchPart = añadir XP
-	if isTouchPart(target) then
-		TouchPartClickEvent:FireServer(plotNumber)
-		return
-	end
 
 	-- Click en modelo del shaker = añadir ingrediente
 	if isPartOfShakerModel(target) then
@@ -416,15 +405,59 @@ mouse.Button1Down:Connect(function()
 end)
 
 ------------------------------------------------------------------------
+-- SETUP PLOT
+------------------------------------------------------------------------
+
+local function loadPlotEffects(plotName)
+	if currentPlotTrove then
+		currentPlotTrove:Destroy()
+		currentPlotTrove = nil
+	end
+
+	currentTouchPart = nil
+	clearHighlight()
+
+	if not plotName or plotName == "" then
+		return
+	end
+
+	local plotFolder = plotsFolder:FindFirstChild(plotName)
+	if not plotFolder then return end
+
+	local shakerFolder = plotFolder:FindFirstChild("Shakers")
+	if not shakerFolder then return end
+
+	currentPlotTrove = mainTrove:Extend()
+
+	local touchPart = shakerFolder:FindFirstChild("TouchPart")
+	if touchPart then
+		currentTouchPart = touchPart
+		ShakerButton.setup(touchPart, currentPlotTrove, onTouchPartClick)
+	end
+end
+
+local function setupPlotWatcher()
+	local currentPlotValue = player:WaitForChild("CurrentPlot", 10)
+	if not currentPlotValue then return end
+
+	if currentPlotValue.Value ~= "" then
+		task.wait(0.3)
+		loadPlotEffects(currentPlotValue.Value)
+	end
+
+	mainTrove:Connect(currentPlotValue:GetPropertyChangedSignal("Value"), function()
+		task.wait(0.2)
+		loadPlotEffects(currentPlotValue.Value)
+	end)
+end
+
+------------------------------------------------------------------------
 -- SINCRONIZACIÓN CON INGREDIENTES
 ------------------------------------------------------------------------
 
 local function setupPlayerShakers()
 	local playerShakers = player:WaitForChild("Shakers", 10)
-	if not playerShakers then
-		print("[ShakerClient] ERROR: No se encontró folder Shakers")
-		return
-	end
+	if not playerShakers then return end
 
 	local function updateVisuals()
 		if not ActiveEffects.active then return end
@@ -447,10 +480,25 @@ local function setupPlayerShakers()
 		ActiveEffects.connection = startJellyEffect(parts, ActiveEffects.mixedColor)
 	end
 
-	playerShakers.ChildAdded:Connect(updateVisuals)
-	playerShakers.ChildRemoved:Connect(updateVisuals)
+	mainTrove:Connect(playerShakers.ChildAdded, updateVisuals)
+	mainTrove:Connect(playerShakers.ChildRemoved, updateVisuals)
 end
 
-task.spawn(setupPlayerShakers)
+------------------------------------------------------------------------
+-- INICIALIZACIÓN
+------------------------------------------------------------------------
 
-print("[ShakerClient] Inicialización completa")
+local function initialize()
+	local success, err = pcall(function()
+		setupPlotWatcher()
+		setupPlayerShakers()
+	end)
+
+	if not success then
+		warn("[ShakerClient] Error initializing:", err)
+		task.wait(2)
+		initialize()
+	end
+end
+
+initialize()
