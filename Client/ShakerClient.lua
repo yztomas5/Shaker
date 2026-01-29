@@ -9,12 +9,15 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
+
+print("[ShakerClient] Iniciando...")
 
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
 local plotsFolder = Workspace:WaitForChild("Plots")
+
+print("[ShakerClient] Esperando eventos...")
 
 -- Esperar eventos
 local shakersFolder = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Shakers")
@@ -24,23 +27,35 @@ local UpdateProgressEvent = shakersFolder:WaitForChild("UpdateProgress")
 local CompleteMixingEvent = shakersFolder:WaitForChild("CompleteMixing")
 local ShakerClickEvent = shakersFolder:WaitForChild("ShakerClick")
 
+print("[ShakerClient] Eventos encontrados")
+
 -- Config de ingredientes
 local IngredientConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("IngredientConfig"))
 
+print("[ShakerClient] Config cargada")
+
 -- Estado
 local ActiveEffects = {} -- [shakerNumber] = {parts, connection, mixedColor}
-local CurrentHighlight = nil -- Highlight actual
-local CurrentHoveredModel = nil -- Modelo actualmente bajo el mouse
+local CurrentHighlight = nil
+local CurrentHoveredShaker = nil
 
 ------------------------------------------------------------------------
 -- UTILIDADES
 ------------------------------------------------------------------------
 
-local function getShakerFolder(shakerNumber)
+local function getCurrentPlotNumber()
 	local currentPlot = player:FindFirstChild("CurrentPlot")
-	if not currentPlot or currentPlot.Value == "" then return nil end
+	if currentPlot and currentPlot.Value ~= "" then
+		return currentPlot.Value
+	end
+	return nil
+end
 
-	local plotFolder = plotsFolder:FindFirstChild(currentPlot.Value)
+local function getShakerFolder(shakerNumber)
+	local plotNumber = getCurrentPlotNumber()
+	if not plotNumber then return nil end
+
+	local plotFolder = plotsFolder:FindFirstChild(plotNumber)
 	if not plotFolder then return nil end
 
 	local shakersRoot = plotFolder:FindFirstChild("Shakers")
@@ -87,20 +102,42 @@ local function isIngredientTool(tool)
 	return typeValue and typeValue:IsA("StringValue") and typeValue.Value == "Ingredient"
 end
 
-local function findShakerModelFromPart(part)
-	-- Buscar hacia arriba hasta encontrar un modelo con atributos de shaker
+-- Buscar shaker desde una parte clickeada
+-- Busca hacia arriba en la jerarquía hasta encontrar un folder de shaker numerado
+local function findShakerFromPart(part)
+	local plotNumber = getCurrentPlotNumber()
+	if not plotNumber then return nil, nil end
+
+	local plotFolder = plotsFolder:FindFirstChild(plotNumber)
+	if not plotFolder then return nil, nil end
+
+	local shakersRoot = plotFolder:FindFirstChild("Shakers")
+	if not shakersRoot then return nil, nil end
+
+	-- Buscar hacia arriba hasta encontrar algo que sea hijo de un shaker
 	local current = part
 	while current and current ~= Workspace do
-		if current:IsA("Model") then
-			local shakerNum = current:GetAttribute("ShakerNumber")
-			local plotNum = current:GetAttribute("PlotNumber")
-			if shakerNum and plotNum then
-				return current, shakerNum, plotNum
+		local parent = current.Parent
+		if parent then
+			-- Verificar si el parent es un shaker folder (hijo directo de shakersRoot)
+			if parent.Parent == shakersRoot then
+				local shakerNum = tonumber(parent.Name)
+				if shakerNum then
+					return shakerNum, parent
+				end
+			end
+			-- Verificar si el parent es shakersRoot y current es un shaker folder
+			if parent == shakersRoot then
+				local shakerNum = tonumber(current.Name)
+				if shakerNum then
+					return shakerNum, current
+				end
 			end
 		end
-		current = current.Parent
+		current = parent
 	end
-	return nil, nil, nil
+
+	return nil, nil
 end
 
 ------------------------------------------------------------------------
@@ -112,15 +149,25 @@ local function clearHighlight()
 		CurrentHighlight:Destroy()
 		CurrentHighlight = nil
 	end
-	CurrentHoveredModel = nil
+	CurrentHoveredShaker = nil
 end
 
-local function applyHighlight(model)
-	if CurrentHoveredModel == model then return end
+local function applyHighlight(shakerFolder)
+	if CurrentHoveredShaker == shakerFolder then return end
 
 	clearHighlight()
+	CurrentHoveredShaker = shakerFolder
 
-	CurrentHoveredModel = model
+	-- Buscar el modelo dentro del folder Model
+	local modelFolder = shakerFolder:FindFirstChild("Model")
+	if not modelFolder then return end
+
+	local model = modelFolder:FindFirstChildOfClass("Model")
+	if not model then
+		-- Si no hay Model, buscar cualquier BasePart
+		model = modelFolder:FindFirstChildOfClass("BasePart")
+	end
+	if not model then return end
 
 	local highlight = Instance.new("Highlight")
 	highlight.Name = "ShakerHighlight"
@@ -285,14 +332,22 @@ end
 ------------------------------------------------------------------------
 
 StartMixingEvent.OnClientEvent:Connect(function(shakerNumber, mixedColor)
+	print("[ShakerClient] StartMixing recibido:", shakerNumber)
 	stopEffects(shakerNumber)
 
 	local contentPart = getContentPart(shakerNumber)
-	if not contentPart then return end
+	if not contentPart then
+		print("[ShakerClient] No se encontró contentPart para shaker:", shakerNumber)
+		return
+	end
 
 	local ingredientNames = getIngredientNames(shakerNumber)
-	if #ingredientNames == 0 then return end
+	if #ingredientNames == 0 then
+		print("[ShakerClient] No hay ingredientes para shaker:", shakerNumber)
+		return
+	end
 
+	print("[ShakerClient] Creando efectos visuales con", #ingredientNames, "ingredientes")
 	local parts = createJuiceParts(contentPart, ingredientNames, mixedColor)
 
 	ActiveEffects[shakerNumber] = {
@@ -307,10 +362,12 @@ StartMixingEvent.OnClientEvent:Connect(function(shakerNumber, mixedColor)
 end)
 
 StopMixingEvent.OnClientEvent:Connect(function(shakerNumber)
+	print("[ShakerClient] StopMixing recibido:", shakerNumber)
 	stopEffects(shakerNumber)
 end)
 
 CompleteMixingEvent.OnClientEvent:Connect(function(shakerNumber, mixedColor)
+	print("[ShakerClient] CompleteMixing recibido:", shakerNumber)
 	stopEffects(shakerNumber)
 
 	local contentPart = getContentPart(shakerNumber)
@@ -331,13 +388,13 @@ RunService.RenderStepped:Connect(function()
 		return
 	end
 
-	local model, shakerNum, plotNum = findShakerModelFromPart(target)
+	local shakerNum, shakerFolder = findShakerFromPart(target)
 
-	if model then
+	if shakerNum and shakerFolder then
 		local tool = getEquippedTool()
 		-- Mostrar highlight si tiene ingrediente o energizante en mano
 		if tool and (isIngredientTool(tool) or tool.Name:find("Energizing")) then
-			applyHighlight(model)
+			applyHighlight(shakerFolder)
 		else
 			clearHighlight()
 		end
@@ -351,14 +408,14 @@ mouse.Button1Down:Connect(function()
 	local target = mouse.Target
 	if not target then return end
 
-	local model, shakerNum, plotNum = findShakerModelFromPart(target)
+	local shakerNum, shakerFolder = findShakerFromPart(target)
+	local plotNumber = getCurrentPlotNumber()
 
-	if model and shakerNum and plotNum then
-		-- Verificar que es nuestro plot
-		local currentPlot = player:FindFirstChild("CurrentPlot")
-		if currentPlot and currentPlot.Value == plotNum then
-			ShakerClickEvent:FireServer(shakerNum, plotNum)
-		end
+	print("[ShakerClient] Click detectado - target:", target.Name, "shakerNum:", shakerNum, "plot:", plotNumber)
+
+	if shakerNum and plotNumber then
+		print("[ShakerClient] Enviando click al servidor - shaker:", shakerNum, "plot:", plotNumber)
+		ShakerClickEvent:FireServer(shakerNum, plotNumber)
 	end
 end)
 
@@ -394,14 +451,21 @@ local function watchShakerFolder(shakerFolder, shakerNumber)
 end
 
 local function setupPlayerShakers()
+	print("[ShakerClient] Esperando folder Shakers del jugador...")
 	local playerShakers = player:WaitForChild("Shakers", 10)
-	if not playerShakers then return end
+	if not playerShakers then
+		print("[ShakerClient] ERROR: No se encontró folder Shakers después de 10 segundos")
+		return
+	end
+
+	print("[ShakerClient] Folder Shakers encontrado")
 
 	for _, shakerFolder in ipairs(playerShakers:GetChildren()) do
 		if shakerFolder:IsA("Folder") then
 			local shakerNumber = tonumber(shakerFolder.Name)
 			if shakerNumber then
 				watchShakerFolder(shakerFolder, shakerNumber)
+				print("[ShakerClient] Observando shaker:", shakerNumber)
 			end
 		end
 	end
@@ -411,9 +475,12 @@ local function setupPlayerShakers()
 			local shakerNumber = tonumber(shakerFolder.Name)
 			if shakerNumber then
 				watchShakerFolder(shakerFolder, shakerNumber)
+				print("[ShakerClient] Nuevo shaker añadido:", shakerNumber)
 			end
 		end
 	end)
 end
 
 task.spawn(setupPlayerShakers)
+
+print("[ShakerClient] Inicialización completa")

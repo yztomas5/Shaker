@@ -382,33 +382,53 @@ end
 
 local function syncPlayerShakers(player)
 	local currentPlot = player:FindFirstChild("CurrentPlot")
-	if not currentPlot or currentPlot.Value == "" then return end
+	if not currentPlot or currentPlot.Value == "" then
+		print("[ShakerServer] syncPlayerShakers: No CurrentPlot para", player.Name)
+		return
+	end
+
+	print("[ShakerServer] syncPlayerShakers: Plot =", currentPlot.Value)
 
 	local playerShakers = Data.EnsureShakersFolder(player)
 	local plotFolder = plotsFolder:FindFirstChild(currentPlot.Value)
-	if not plotFolder then return end
+	if not plotFolder then
+		print("[ShakerServer] syncPlayerShakers: No se encontró plotFolder:", currentPlot.Value)
+		return
+	end
 
 	local shakersRoot = plotFolder:FindFirstChild("Shakers")
-	if not shakersRoot then return end
+	if not shakersRoot then
+		print("[ShakerServer] syncPlayerShakers: No se encontró Shakers en plot")
+		return
+	end
 
+	-- SOLO sincronizar folders con nombres numéricos (1, 2, 3, etc.)
 	local desired = {}
 	for _, child in ipairs(shakersRoot:GetChildren()) do
 		if child:IsA("Folder") then
-			desired[child.Name] = true
+			local num = tonumber(child.Name)
+			if num then
+				desired[child.Name] = true
+				print("[ShakerServer] syncPlayerShakers: Shaker encontrado:", child.Name)
+			end
 		end
 	end
 
+	-- Eliminar folders que no corresponden
 	for _, folder in ipairs(playerShakers:GetChildren()) do
 		if folder:IsA("Folder") and not desired[folder.Name] then
+			print("[ShakerServer] syncPlayerShakers: Eliminando folder no deseado:", folder.Name)
 			folder:Destroy()
 		end
 	end
 
+	-- Crear folders faltantes
 	for name in pairs(desired) do
 		if not playerShakers:FindFirstChild(name) then
 			local f = Instance.new("Folder")
 			f.Name = name
 			f.Parent = playerShakers
+			print("[ShakerServer] syncPlayerShakers: Creando folder:", name)
 		end
 	end
 
