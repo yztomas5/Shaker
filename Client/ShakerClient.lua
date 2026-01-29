@@ -18,11 +18,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
-local SoundService = game:GetService("SoundService")
 
 local Trove = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Data"):WaitForChild("Trove"))
 local ShakerButton = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utils"):WaitForChild("ShakerSystem"):WaitForChild("ShakerButton"))
 local ShakerConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utils"):WaitForChild("ShakerSystem"):WaitForChild("ShakerConfig"))
+local ShakerEffects = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utils"):WaitForChild("ShakerSystem"):WaitForChild("ShakerEffects"))
 
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
@@ -40,14 +40,6 @@ local CancelMixingEvent = shakersFolder:WaitForChild("CancelMixing")
 local IngredientAddedEvent = shakersFolder:WaitForChild("IngredientAdded")
 local IngredientRemovedEvent = shakersFolder:WaitForChild("IngredientRemoved")
 local EnergizingAddedEvent = shakersFolder:WaitForChild("EnergizingAdded")
-
--- IDs de sonidos
-local SOUNDS = {
-	ADD_INGREDIENT = "rbxassetid://9119713951",
-	REMOVE_INGREDIENT = "rbxassetid://9119720149",
-	ADD_ENERGIZING = "rbxassetid://9119713951",
-	COMPLETE_MIXING = "rbxassetid://9125645146"
-}
 
 -- GUI de Warning
 local warnGui = player:WaitForChild("PlayerGui"):WaitForChild("Warn")
@@ -70,17 +62,6 @@ local CurrentHoveredModel = nil
 ------------------------------------------------------------------------
 -- UTILIDADES
 ------------------------------------------------------------------------
-
-local function playSound(soundId, volume)
-	local sound = Instance.new("Sound")
-	sound.SoundId = soundId
-	sound.Volume = volume or 0.5
-	sound.Parent = SoundService
-	sound:Play()
-	sound.Ended:Connect(function()
-		sound:Destroy()
-	end)
-end
 
 local function getCurrentPlotNumber()
 	local currentPlot = player:FindFirstChild("CurrentPlot")
@@ -123,6 +104,12 @@ local function getShakerModel()
 		end
 	end
 	return nil
+end
+
+local function getPourPart()
+	local shakerFolder = getShakerFolder()
+	if not shakerFolder then return nil end
+	return shakerFolder:FindFirstChild("Pour")
 end
 
 local function getIngredientNames()
@@ -363,10 +350,14 @@ StartMixingEvent.OnClientEvent:Connect(function(mixedColor)
 
 	local parts = createJuiceParts(contentPart, ingredientNames, mixedColor)
 
+	-- Iniciar efectos de sonido y partículas de burbujas
+	local soundClone, _ = ShakerEffects.StartShakeEffects(contentPart, mixedColor)
+
 	ActiveEffects = {
 		active = true,
 		parts = parts,
-		mixedColor = mixedColor
+		mixedColor = mixedColor,
+		soundClone = soundClone
 	}
 
 	local connection = startJellyEffect(parts, mixedColor)
@@ -374,21 +365,42 @@ StartMixingEvent.OnClientEvent:Connect(function(mixedColor)
 end)
 
 StopMixingEvent.OnClientEvent:Connect(function()
+	local contentPart = getContentPart()
+
+	-- Detener efectos de burbujas con fade
+	if ActiveEffects.soundClone then
+		ShakerEffects.StopShakeEffects(ActiveEffects.soundClone, contentPart)
+	end
+
+	-- Sonido de remover
+	if contentPart then
+		ShakerEffects.PlayRemoveIngredientSound(contentPart)
+	end
+
 	stopEffects()
-	playSound(SOUNDS.REMOVE_INGREDIENT, 0.5)
 end)
 
 CompleteMixingEvent.OnClientEvent:Connect(function(mixedColor)
-	playSound(SOUNDS.COMPLETE_MIXING, 0.7)
+	local contentPart = getContentPart()
+	local pourPart = getPourPart()
 
-	-- Detener efectos pero no borrar partes aún
+	-- Detener efectos de burbujas con fade
+	if ActiveEffects.soundClone then
+		ShakerEffects.StopShakeEffects(ActiveEffects.soundClone, contentPart)
+	end
+
+	-- Efecto de vertir con sonido y partículas
+	if pourPart then
+		ShakerEffects.PlayPourEffect(pourPart, mixedColor)
+	end
+
+	-- Detener jelly effect
 	if ActiveEffects.connection then
 		ActiveEffects.connection:Disconnect()
 	end
 	ActiveEffects.active = false
 
 	-- Encoger partes antes de destruirlas
-	local contentPart = getContentPart()
 	if contentPart then
 		for _, child in ipairs(contentPart:GetChildren()) do
 			if child:IsA("BasePart") and child.Name:find("Layer_") then
@@ -407,41 +419,60 @@ CompleteMixingEvent.OnClientEvent:Connect(function(mixedColor)
 	ActiveEffects = {}
 end)
 
--- Sonido al añadir ingrediente
-IngredientAddedEvent.OnClientEvent:Connect(function()
-	playSound(SOUNDS.ADD_INGREDIENT, 0.5)
+-- Sonido y efecto de burbujas al añadir ingrediente
+IngredientAddedEvent.OnClientEvent:Connect(function(ingredientColor)
+	local contentPart = getContentPart()
+	if contentPart then
+		ShakerEffects.PlayAddIngredientSound(contentPart)
+		if ingredientColor then
+			ShakerEffects.PlayAddIngredientBubbles(contentPart, ingredientColor)
+		end
+	end
 end)
 
 -- Sonido al remover ingrediente
 IngredientRemovedEvent.OnClientEvent:Connect(function()
-	playSound(SOUNDS.REMOVE_INGREDIENT, 0.5)
+	local contentPart = getContentPart()
+	if contentPart then
+		ShakerEffects.PlayRemoveIngredientSound(contentPart)
+	end
 end)
 
--- Efecto de energizante añadido
-EnergizingAddedEvent.OnClientEvent:Connect(function(xpAdded)
-	playSound(SOUNDS.ADD_ENERGIZING, 0.6)
+-- Efecto de energizante añadido (sonido y partículas según tipo)
+EnergizingAddedEvent.OnClientEvent:Connect(function(xpAdded, energizerName)
+	local contentPart = getContentPart()
+	if not contentPart then return end
 
-	-- Efecto visual: flash en las partes
+	-- Reproducir sonido y VFX según el tipo de energizante
+	if energizerName == "Energizing" then
+		ShakerEffects.PlayEnergizingSound(contentPart)
+	elseif energizerName == "Mid Energizing" then
+		ShakerEffects.PlayMidEnergizingSound(contentPart)
+	elseif energizerName == "Big Energizing" then
+		ShakerEffects.PlayBigEnergizingSound(contentPart)
+	else
+		-- Fallback al efecto básico
+		ShakerEffects.PlayEnergizingSound(contentPart)
+	end
+
+	-- Efecto visual adicional: flash en las partes del juice
 	if ActiveEffects.parts then
 		for _, part in ipairs(ActiveEffects.parts) do
 			if part.Parent then
 				local originalColor = part.Color
 				local flashColor = Color3.fromRGB(255, 255, 150)
 
-				-- Flash amarillo
 				local flashTween = TweenService:Create(part, TweenInfo.new(0.1), {
 					Color = flashColor
 				})
 				flashTween:Play()
 				flashTween.Completed:Connect(function()
-					-- Volver al color original
 					local returnTween = TweenService:Create(part, TweenInfo.new(0.3), {
 						Color = originalColor
 					})
 					returnTween:Play()
 				end)
 
-				-- Efecto de escala
 				local originalSize = part.Size
 				local bigSize = originalSize * 1.2
 				local scaleTween = TweenService:Create(part, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {

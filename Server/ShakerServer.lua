@@ -285,7 +285,7 @@ local function handleShakerClick(player, plotNumber)
 
 				updateBillboard(player, data.currentXp, data.requiredXp, true)
 				UpdateProgressEvent:FireClient(player, data.currentXp, data.requiredXp)
-				EnergizingAddedEvent:FireClient(player, xpToAdd)
+				EnergizingAddedEvent:FireClient(player, xpToAdd, tool.Name)
 
 				-- Verificar si se completó
 				if data.currentXp >= data.requiredXp then
@@ -302,9 +302,12 @@ local function handleShakerClick(player, plotNumber)
 		local ingredient = toolId and Inventory.FindIngredient(player, tool.Name, toolId)
 		if ingredient then
 			print("[ShakerServer] Añadiendo ingrediente:", tool.Name)
+			-- Obtener color del ingrediente para efectos
+			local ingredientInfo = IngredientConfig.Ingredients[tool.Name]
+			local ingredientColor = ingredientInfo and ingredientInfo.Color or nil
 			tool:Destroy()
 			Inventory.Add(player, ingredient)
-			IngredientAddedEvent:FireClient(player)
+			IngredientAddedEvent:FireClient(player, ingredientColor)
 			startMixing(player)
 			return
 		else
