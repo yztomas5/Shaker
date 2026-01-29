@@ -7,7 +7,7 @@ local ShakerConfig = {}
 
 -- Límites
 ShakerConfig.MAX_INGREDIENTS = 3
-ShakerConfig.TOUCH_COOLDOWN = 0.1
+ShakerConfig.TOUCH_COOLDOWN = 2 -- Cooldown entre clicks de TouchPart (segundos)
 ShakerConfig.INTERACTION_COOLDOWN = 0.5
 
 -- XP por toque
