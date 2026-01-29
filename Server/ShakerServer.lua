@@ -399,7 +399,42 @@ end
 local function onPlayerRemoving(player)
 	print("[ShakerServer] Jugador desconectado:", player.Name)
 
+	-- Guardar datos
 	Data.Save(player, ActiveShakes)
+
+	-- Obtener la plot del jugador antes de limpiar
+	local plotNumber = getPlotNumber(player)
+	if plotNumber then
+		local plotFolder = plotsFolder:FindFirstChild(plotNumber)
+		if plotFolder then
+			local shakerFolder = plotFolder:FindFirstChild("Shakers")
+			if shakerFolder then
+				-- Desactivar billboard
+				local info = shakerFolder:FindFirstChild("Info")
+				if info then
+					local billboard = info:FindFirstChild("BillboardGui")
+					if billboard then
+						billboard.Enabled = false
+					end
+				end
+
+				-- Limpiar contenido visual de ingredientes
+				local ingredientsFolder = shakerFolder:FindFirstChild("Ingredients")
+				if ingredientsFolder then
+					local contentPart = ingredientsFolder:FindFirstChild("Content")
+					if contentPart then
+						for _, child in ipairs(contentPart:GetChildren()) do
+							if child:IsA("BasePart") and child.Name:find("Layer_") then
+								child:Destroy()
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	-- Limpiar estado
 	TouchCooldowns[player.UserId] = nil
 	ClickCooldowns[player.UserId] = nil
 	ActiveShakes[player.UserId] = nil
