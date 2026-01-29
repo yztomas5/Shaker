@@ -13,23 +13,12 @@ local playerTroves = {}
 local ShakerPersistence = {}
 
 local ShakerManager = nil
-local ShakerJuice = nil
-local ShakerEffects = nil
-local ShakerModel = nil
-local IngredientConfig = nil
-local MutationConfig = nil
 
 local function InitializeDependencies()
 	if ShakerManager then return end
 
 	local ShakerLogic = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utils"):WaitForChild("ShakerLogic")
 	ShakerManager = require(ShakerLogic:WaitForChild("ShakerManager"))
-	ShakerJuice = require(ShakerLogic:WaitForChild("ShakerJuice"))
-	ShakerEffects = require(ShakerLogic:WaitForChild("ShakerEffects"))
-	ShakerModel = require(ShakerLogic:WaitForChild("ShakerModel"))
-
-	IngredientConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("IngredientConfig"))
-	MutationConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("MutationConfig"))
 end
 
 local function SerializeValue(instance)
@@ -95,7 +84,6 @@ function ShakerPersistence.UpdatePlayerData(player)
 
 	profile.Data.Shakers.ShakerContents = {}
 	profile.Data.Shakers.ActiveShakes = {}
-	profile.Data.Shakers.SaveTime = os.time()
 
 	for _, shakerFolder in ipairs(playerShakers:GetChildren()) do
 		if shakerFolder:IsA("Folder") then
@@ -117,16 +105,10 @@ function ShakerPersistence.UpdatePlayerData(player)
 	if ShakerManager then
 		for shakeKey, shakeData in pairs(ShakerManager.ActiveShakes) do
 			if shakeData.player == player then
-				local elapsed = tick() - shakeData.startTime
-				local remaining = math.max(0, shakeData.duration - elapsed)
-
-				if remaining > 0 then
-					profile.Data.Shakers.ActiveShakes[tostring(shakeData.shakerNumber)] = {
-						TimeRemaining = remaining,
-						TotalDuration = shakeData.duration,
-						MixedColor = {shakeData.mixedColor.R, shakeData.mixedColor.G, shakeData.mixedColor.B}
-					}
-				end
+				profile.Data.Shakers.ActiveShakes[tostring(shakeData.shakerNumber)] = {
+					CurrentXp = shakeData.currentXp,
+					RequiredXp = shakeData.requiredXp
+				}
 			end
 		end
 	end
@@ -173,99 +155,17 @@ end
 function ShakerPersistence.RestoreActiveShakes(player, savedData)
 	if not savedData or not savedData.ActiveShakes then return end
 
-	local currentTime = os.time()
-	local saveTime = savedData.SaveTime or currentTime
-	local offlineTime = currentTime - saveTime
-
 	for shakerNumber, shakeData in pairs(savedData.ActiveShakes) do
 		shakerNumber = tonumber(shakerNumber)
 		if not shakerNumber then continue end
 
-		local timeRemaining = shakeData.TimeRemaining - offlineTime
+		local currentXp = shakeData.CurrentXp or 0
+		local requiredXp = shakeData.RequiredXp or 0
 
-		if timeRemaining <= 0 then
+		if requiredXp > 0 and currentXp < requiredXp then
 			task.spawn(function()
 				task.wait(0.5)
-
-				local playerShakers = player:FindFirstChild("Shakers")
-				if not playerShakers then return end
-
-				local shakerFolder = playerShakers:FindFirstChild(tostring(shakerNumber))
-				if not shakerFolder then return end
-
-				local ingredientFolders = {}
-				for _, child in ipairs(shakerFolder:GetChildren()) do
-					if child:IsA("Folder") then
-						table.insert(ingredientFolders, child)
-					end
-				end
-
-				if #ingredientFolders > 0 then
-					ShakerJuice.CreateJuice(player, shakerNumber, ingredientFolders, IngredientConfig, MutationConfig)
-
-					local shakerModel = ShakerModel.GetCurrentShakerModel(player, shakerNumber)
-					if shakerModel and shakeData.MixedColor then
-						local mixedColor = Color3.new(
-							shakeData.MixedColor[1],
-							shakeData.MixedColor[2],
-							shakeData.MixedColor[3]
-						)
-						ShakerEffects.PlayPourEffect(shakerModel, mixedColor)
-					end
-				end
-			end)
-		else
-			task.spawn(function()
-				task.wait(1)
-
-				local playerShakers = player:FindFirstChild("Shakers")
-				if not playerShakers then return end
-
-				local shakerFolder = playerShakers:FindFirstChild(tostring(shakerNumber))
-				if not shakerFolder then return end
-
-				local ingredientFolders = {}
-				for _, child in ipairs(shakerFolder:GetChildren()) do
-					if child:IsA("Folder") then
-						table.insert(ingredientFolders, child)
-					end
-				end
-
-				if #ingredientFolders > 0 then
-					local shakeKey = player.UserId .. "_" .. shakerNumber
-
-					local mixedColor = Color3.new(
-						shakeData.MixedColor[1],
-						shakeData.MixedColor[2],
-						shakeData.MixedColor[3]
-					)
-
-					ShakerManager.ActiveShakes[shakeKey] = {
-						startTime = tick(),
-						duration = timeRemaining,
-						player = player,
-						shakerNumber = shakerNumber,
-						cancelled = false,
-						mixedColor = mixedColor,
-						soundClone = nil,
-						contentPart = nil
-					}
-
-					local currentModel = ShakerModel.GetCurrentShakerModel(player, shakerNumber)
-					if currentModel then
-						local soundClone, contentPart =
-							ShakerEffects.StartShakeEffects(currentModel, mixedColor)
-
-						ShakerManager.ActiveShakes[shakeKey].soundClone = soundClone
-						ShakerManager.ActiveShakes[shakeKey].contentPart = contentPart
-
-						ShakerEffects.SetStartButtonColor(currentModel, true)
-					end
-
-					task.spawn(function()
-						ShakerManager.UpdateShakeLoop(shakeKey, timeRemaining)
-					end)
-				end
+				ShakerManager.RestoreShake(player, shakerNumber, currentXp, requiredXp)
 			end)
 		end
 	end

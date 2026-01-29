@@ -5,12 +5,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ShakerLogic = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utils"):WaitForChild("ShakerLogic")
 local ShakerInventory = require(ShakerLogic:WaitForChild("ShakerInventory"))
-local ShakerEffects = require(ShakerLogic:WaitForChild("ShakerEffects"))
 local ShakerTool = require(ShakerLogic:WaitForChild("ShakerTool"))
 local ShakerManager = require(ShakerLogic:WaitForChild("ShakerManager"))
-local ShakerModel = require(ShakerLogic:WaitForChild("ShakerModel"))
-
-local ShakerDataManager = require(script.Parent.ShakerDataManager)
 
 local Trove = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Data"):WaitForChild("Trove"))
 
@@ -26,6 +22,9 @@ local plotTroves = {}
 local shakerTroves = {}
 
 local COOLDOWN_TIME = 5
+local TOUCH_COOLDOWN = 0.1
+
+local playerTouchCooldowns = {}
 
 local function canPlayerInteract(player)
 	local currentTime = tick()
@@ -38,17 +37,31 @@ local function canPlayerInteract(player)
 	return currentTime >= cooldownEnd
 end
 
+local function canPlayerTouch(player)
+	local currentTime = tick()
+	local cooldownEnd = playerTouchCooldowns[player.UserId]
+
+	if not cooldownEnd then
+		playerTouchCooldowns[player.UserId] = currentTime
+		return true
+	end
+
+	if currentTime >= cooldownEnd then
+		playerTouchCooldowns[player.UserId] = currentTime + TOUCH_COOLDOWN
+		return true
+	end
+
+	return false
+end
+
 mainTrove:Connect(Players.PlayerAdded, function(player)
 	playerCooldowns[player.UserId] = tick() + COOLDOWN_TIME
-
-	task.delay(COOLDOWN_TIME, function()
-		if player and player.Parent then
-		end
-	end)
+	playerTouchCooldowns[player.UserId] = tick()
 end)
 
 mainTrove:Connect(Players.PlayerRemoving, function(player)
 	playerCooldowns[player.UserId] = nil
+	playerTouchCooldowns[player.UserId] = nil
 end)
 
 local function checkInventorySpace(player)
@@ -126,7 +139,8 @@ local function updateAddRemovePrompt(prompt, player, shakerNumber)
 	end
 
 	if isShakeActive then
-		prompt.Enabled = false
+		prompt.ActionText = "Cancel"
+		prompt.Enabled = true
 		return
 	end
 
@@ -142,34 +156,13 @@ local function updateAddRemovePrompt(prompt, player, shakerNumber)
 		end
 	end
 
-	if ingredientCount > 0 then
+	if ingredientCount > 0 and not isShakeActive then
 		prompt.ActionText = "Remove (" .. ingredientCount .. "/" .. MAX_INGREDIENTS .. ")"
 		prompt.Enabled = true
 		return
 	end
 
 	prompt.Enabled = false
-end
-
-local function updateStartPrompt(prompt, player, shakerNumber)
-	if not canPlayerInteract(player) then
-		prompt.Enabled = false
-		return
-	end
-
-	if ShakerManager.IsShakeActive(player, shakerNumber) then
-		prompt.ActionText = "Cancel"
-		prompt.Enabled = true
-		return
-	end
-
-	local ingredientCount = ShakerInventory.CountIngredients(player, shakerNumber)
-	if ingredientCount > 0 then
-		prompt.ActionText = "Start"
-		prompt.Enabled = true
-	else
-		prompt.Enabled = false
-	end
 end
 
 local function handleAddRemove(player, shakerNumber, plotNumber)
@@ -189,17 +182,17 @@ local function handleAddRemove(player, shakerNumber, plotNumber)
 
 	if isShakeActive and tool then
 		local toolName = tool.Name
-		local reductionPercentage = nil
+		local xpIncreasePercentage = nil
 
 		if toolName == "Energizing" then
-			reductionPercentage = 0.25
+			xpIncreasePercentage = 0.10
 		elseif toolName == "Mid Energizing" then
-			reductionPercentage = 0.50
+			xpIncreasePercentage = 0.25
 		elseif toolName == "Big Energizing" then
-			reductionPercentage = 1.00
+			xpIncreasePercentage = 0.50
 		end
 
-		if reductionPercentage then
+		if xpIncreasePercentage then
 			local toolId = ShakerTool.GetToolId(tool)
 			if not toolId then return end
 
@@ -209,35 +202,20 @@ local function handleAddRemove(player, shakerNumber, plotNumber)
 				energizingFolder:Destroy()
 				task.wait(0.1)
 
-				ShakerManager.ReduceShakeTime(player, shakerNumber, reductionPercentage)
-
-				local shakerModel = ShakerModel.GetCurrentShakerModel(player, shakerNumber)
-				if shakerModel then
-					local contentPart = ShakerModel.GetContentPart(shakerModel)
-					if contentPart then
-						if toolName == "Energizing" then
-							ShakerEffects.PlayEnergizingSound(contentPart)
-						elseif toolName == "Mid Energizing" then
-							ShakerEffects.PlayMidEnergizingSound(contentPart)
-						elseif toolName == "Big Energizing" then
-							ShakerEffects.PlayBigEnergizingSound(contentPart)
-						end
-					end
-				end
-
-				local percentText = math.floor(reductionPercentage * 100)
+				ShakerManager.IncreaseRequiredXp(player, shakerNumber, xpIncreasePercentage)
 			end
 			return
 		end
 	end
 
 	if isShakeActive then
+		ShakerManager.CancelShake(player, shakerNumber)
 		return
 	end
 
 	local ingredientCount = ShakerInventory.CountIngredients(player, shakerNumber)
-	local shouldAdd = tool 
-		and ShakerTool.IsIngredientTool(tool) 
+	local shouldAdd = tool
+		and ShakerTool.IsIngredientTool(tool)
 		and ingredientCount < MAX_INGREDIENTS
 
 	if shouldAdd then
@@ -257,37 +235,23 @@ local function handleAddRemove(player, shakerNumber, plotNumber)
 			task.wait(0.1)
 
 			if ShakerInventory.AddIngredient(player, shakerNumber, ingredientFolder) then
-				local shakerModel = ShakerModel.GetCurrentShakerModel(player, shakerNumber)
-				if shakerModel then
-					local contentPart = ShakerModel.GetContentPart(shakerModel)
-					if contentPart then
-						ShakerEffects.PlayAddIngredientSound(contentPart)
-
-						-- Obtener el color del ingrediente y aplicar partículas
-						local IngredientConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("IngredientConfig"))
-						local ingredientData = IngredientConfig.Ingredients[ingredientName]
-						if ingredientData and ingredientData.Color then
-							ShakerEffects.PlayAddIngredientBubbles(contentPart, ingredientData.Color)
-						end
-					end
-				end
+				ShakerManager.StartShake(player, shakerNumber)
 			end
 		end
 	elseif ingredientCount > 0 then
 		if ShakerInventory.RemoveIngredient(player, shakerNumber) then
-			local shakerModel = ShakerModel.GetCurrentShakerModel(player, shakerNumber)
-			if shakerModel then
-				local contentPart = ShakerModel.GetContentPart(shakerModel)
-				if contentPart then
-					ShakerEffects.PlayRemoveIngredientSound(contentPart)
-				end
+			local newCount = ShakerInventory.CountIngredients(player, shakerNumber)
+			if newCount == 0 then
+				ShakerManager.StopShake(player, shakerNumber)
+			else
+				ShakerManager.RecalculateRequiredXp(player, shakerNumber)
 			end
 		end
 	end
 end
 
-local function handleStartCancel(player, shakerNumber, plotNumber)
-	if not canPlayerInteract(player) then
+local function handleTouchPart(player, shakerNumber, plotNumber)
+	if not canPlayerTouch(player) then
 		return
 	end
 
@@ -295,18 +259,24 @@ local function handleStartCancel(player, shakerNumber, plotNumber)
 		return
 	end
 
-	if ShakerManager.IsShakeActive(player, shakerNumber) then
-		ShakerManager.CancelShake(player, shakerNumber)
-	else
-		ShakerManager.StartShake(player, shakerNumber)
+	if not ShakerManager.IsShakeActive(player, shakerNumber) then
+		return
 	end
+
+	ShakerManager.AddXp(player, shakerNumber, 1)
 end
 
-local function setupShakerPrompts(shakerModel, shakerNumber, plotNumber)
-	local addPart = shakerModel:WaitForChild("Add", 5)
-	local startPart = shakerModel:WaitForChild("Start", 5)
+local function getPlotShakersFolder(plotNumber)
+	local plotFolder = plotsFolder:FindFirstChild(plotNumber)
+	if not plotFolder then return nil end
+	return plotFolder:FindFirstChild("Shakers")
+end
 
-	if not addPart or not startPart then
+local function setupShakerPrompts(shakersFolder, shakerNumber, plotNumber)
+	local addPart = shakersFolder:FindFirstChild("Add")
+	local touchPart = shakersFolder:FindFirstChild("TouchPart")
+
+	if not addPart then
 		return
 	end
 
@@ -333,32 +303,27 @@ local function setupShakerPrompts(shakerModel, shakerNumber, plotNumber)
 	addRemovePrompt.Parent = addPart
 	shakerTrove:Add(addRemovePrompt)
 
-	local startPrompt = Instance.new("ProximityPrompt")
-	startPrompt.Name = "StartPrompt"
-	startPrompt.ActionText = "Start"
-	startPrompt.ObjectText = ""
-	startPrompt.HoldDuration = 1
-	startPrompt.MaxActivationDistance = 10
-	startPrompt.RequiresLineOfSight = false
-	startPrompt.Style = Enum.ProximityPromptStyle.Custom
-	startPrompt.Enabled = false
-	startPrompt.Parent = startPart
-	shakerTrove:Add(startPrompt)
-
-	if startPart:IsA("BasePart") then
-		startPart.Color = Color3.fromRGB(0, 255, 0)
-	end
-
 	shakerTrove:Connect(addRemovePrompt.Triggered, function(player)
 		handleAddRemove(player, shakerNumber, plotNumber)
 	end)
 
-	shakerTrove:Connect(startPrompt.Triggered, function(player)
-		handleStartCancel(player, shakerNumber, plotNumber)
-	end)
+	if touchPart then
+		shakerTrove:Connect(touchPart.Touched, function(hit)
+			local character = hit.Parent
+			if not character then return end
+
+			local humanoid = character:FindFirstChildOfClass("Humanoid")
+			if not humanoid then return end
+
+			local player = Players:GetPlayerFromCharacter(character)
+			if not player then return end
+
+			handleTouchPart(player, shakerNumber, plotNumber)
+		end)
+	end
 
 	shakerTrove:Connect(RunService.Heartbeat, function()
-		if not shakerModel.Parent or not addPart.Parent then
+		if not shakersFolder.Parent or not addPart.Parent then
 			if shakerTroves[shakerKey] then
 				shakerTroves[shakerKey]:Destroy()
 				shakerTroves[shakerKey] = nil
@@ -371,14 +336,9 @@ local function setupShakerPrompts(shakerModel, shakerNumber, plotNumber)
 				local character = player.Character
 				if character and character:FindFirstChild("HumanoidRootPart") then
 					local distanceToAdd = (character.HumanoidRootPart.Position - addPart.Position).Magnitude
-					local distanceToStart = (character.HumanoidRootPart.Position - startPart.Position).Magnitude
 
 					if distanceToAdd <= 10 then
 						updateAddRemovePrompt(addRemovePrompt, player, shakerNumber)
-					end
-
-					if distanceToStart <= 10 then
-						updateStartPrompt(startPrompt, player, shakerNumber)
 					end
 				end
 			end
@@ -386,30 +346,30 @@ local function setupShakerPrompts(shakerModel, shakerNumber, plotNumber)
 	end)
 end
 
-local function monitorShakersFolder(realShakersFolder, plotNumber)
+local function monitorShakersFolder(plotShakersFolder, plotNumber)
 	local plotKey = "monitor_" .. plotNumber
 	if not plotTroves[plotKey] then
 		plotTroves[plotKey] = Trove.new()
 	end
 	local plotTrove = plotTroves[plotKey]
 
-	for _, shakerModel in ipairs(realShakersFolder:GetChildren()) do
-		if shakerModel:IsA("Model") then
-			local shakerNumber = tonumber(shakerModel.Name)
+	for _, shakerFolder in ipairs(plotShakersFolder:GetChildren()) do
+		if shakerFolder:IsA("Folder") then
+			local shakerNumber = tonumber(shakerFolder.Name)
 			if shakerNumber then
 				task.spawn(function()
-					setupShakerPrompts(shakerModel, shakerNumber, plotNumber)
+					setupShakerPrompts(shakerFolder, shakerNumber, plotNumber)
 				end)
 			end
 		end
 	end
 
-	plotTrove:Connect(realShakersFolder.ChildAdded, function(shakerModel)
-		if shakerModel:IsA("Model") then
-			local shakerNumber = tonumber(shakerModel.Name)
+	plotTrove:Connect(plotShakersFolder.ChildAdded, function(shakerFolder)
+		if shakerFolder:IsA("Folder") then
+			local shakerNumber = tonumber(shakerFolder.Name)
 			if shakerNumber then
 				task.spawn(function()
-					setupShakerPrompts(shakerModel, shakerNumber, plotNumber)
+					setupShakerPrompts(shakerFolder, shakerNumber, plotNumber)
 				end)
 			end
 		end
@@ -420,7 +380,7 @@ local function initializePlotShakers(plotFolder)
 	local plotNumber = plotFolder.Name
 
 	local plotShakersRoot = plotFolder:FindFirstChild("Shakers")
-	if not plotShakersRoot then 
+	if not plotShakersRoot then
 		plotShakersRoot = plotFolder:WaitForChild("Shakers", 10)
 		if not plotShakersRoot then
 			return
@@ -431,60 +391,13 @@ local function initializePlotShakers(plotFolder)
 		plotTroves[plotNumber]:Destroy()
 	end
 	plotTroves[plotNumber] = Trove.new()
-	local plotTrove = plotTroves[plotNumber]
 
-	local currentModel = nil
-
-	local function onModelChanged(newModel)
-		if currentModel then
-			local player = ShakerModel.GetPlayerForPlot(plotNumber)
-			if player then
-				ShakerDataManager.SavePlayerShakerData(player)
-			end
-		end
-
-		currentModel = newModel
-
-		if newModel and newModel:IsA("Model") then
-			task.wait(0.5)
-
-			local realShakersFolder = newModel:FindFirstChild("Shakers")
-			if realShakersFolder then
-				monitorShakersFolder(realShakersFolder, plotNumber)
-
-				local player = ShakerModel.GetPlayerForPlot(plotNumber)
-				if player then
-					task.wait(0.5)
-					ShakerDataManager.RestorePlayerShakerData(player)
-				end
-			end
-		end
-	end
-
-	plotTrove:Connect(plotShakersRoot.ChildAdded, function(child)
-		if child:IsA("Model") then
-			onModelChanged(child)
-		end
-	end)
-
-	plotTrove:Connect(plotShakersRoot.ChildRemoved, function(child)
-		if child:IsA("Model") and child == currentModel then
-			local player = ShakerModel.GetPlayerForPlot(plotNumber)
-			if player then
-				ShakerDataManager.SavePlayerShakerData(player)
-			end
-			currentModel = nil
-		end
-	end)
-
-	local modelInside = plotShakersRoot:FindFirstChildWhichIsA("Model")
-	if modelInside then
-		onModelChanged(modelInside)
-	end
+	monitorShakersFolder(plotShakersRoot, plotNumber)
 end
 
 for _, player in ipairs(Players:GetPlayers()) do
 	playerCooldowns[player.UserId] = tick() + COOLDOWN_TIME
+	playerTouchCooldowns[player.UserId] = tick()
 end
 
 for _, plotFolder in ipairs(plotsFolder:GetChildren()) do

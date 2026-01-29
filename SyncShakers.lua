@@ -4,9 +4,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Trove = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Data"):WaitForChild("Trove"))
 
-local ShakerLogic = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utils"):WaitForChild("ShakerLogic")
-local LoadingBillboard = require(ShakerLogic:WaitForChild("LoadingBillboard"))
-
 local plotsFolder = Workspace:WaitForChild("Plots")
 
 local mainTrove = Trove.new()
@@ -23,7 +20,7 @@ local function ensurePlayerShakersFolder(player)
 	return f
 end
 
-local function getRealShakersFolderForPlayer(player)
+local function getPlotShakersFolder(player)
 	local currentPlotValue = player:FindFirstChild("CurrentPlot")
 	if not currentPlotValue then return nil end
 	local plotNumber = currentPlotValue.Value
@@ -32,30 +29,24 @@ local function getRealShakersFolderForPlayer(player)
 	local plotFolder = plotsFolder:FindFirstChild(plotNumber)
 	if not plotFolder then return nil end
 
-	local plotShakersRoot = plotFolder:FindFirstChild("Shakers")
-	if not plotShakersRoot then return nil end
-
-	local modelInside = plotShakersRoot:FindFirstChildWhichIsA("Model")
-	if not modelInside then return nil end
-
-	local realShakersFolder = modelInside:FindFirstChild("Shakers")
-	if not realShakersFolder then return nil end
-
-	return realShakersFolder
+	return plotFolder:FindFirstChild("Shakers")
 end
 
 local function syncShakers(player)
 	if not player or not player.Parent then return end
 	local playerShakers = ensurePlayerShakersFolder(player)
-	local realShakersFolder = getRealShakersFolderForPlayer(player)
-	if not realShakersFolder then
+	local plotShakers = getPlotShakersFolder(player)
+	if not plotShakers then
 		return
 	end
 
 	local desired = {}
-	for _, child in ipairs(realShakersFolder:GetChildren()) do
-		if child:IsA("Model") then
-			desired[tostring(child.Name)] = true
+	for _, child in ipairs(plotShakers:GetChildren()) do
+		if child:IsA("Folder") then
+			local shakerNumber = tonumber(child.Name)
+			if shakerNumber then
+				desired[tostring(child.Name)] = true
+			end
 		end
 	end
 
@@ -89,52 +80,20 @@ local function attachListenersForPlayer(player)
 
 	playerTrove:Clean()
 
-	local function connectToPlotModel()
-		local currentPlotValue = player:FindFirstChild("CurrentPlot")
-		if not currentPlotValue then return end
-		local plotNumber = currentPlotValue.Value
-		if plotNumber == "" then return end
+	local function connectToPlotShakers()
+		local plotShakers = getPlotShakersFolder(player)
+		if not plotShakers then return end
 
-		local plotFolder = plotsFolder:FindFirstChild(plotNumber)
-		if not plotFolder then return end
-
-		local plotShakersRoot = plotFolder:FindFirstChild("Shakers")
-		if not plotShakersRoot then return end
-
-		playerTrove:Connect(plotShakersRoot.ChildAdded, function(child)
-			if child:IsA("Model") then
-				task.defer(function()
-					syncShakers(player)
-					connectToPlotModel()
-				end)
-			end
-		end)
-
-		playerTrove:Connect(plotShakersRoot.ChildRemoved, function(child)
-			if child:IsA("Model") then
-				task.defer(function()
-					syncShakers(player)
-					connectToPlotModel()
-				end)
-			end
-		end)
-
-		local modelInside = plotShakersRoot:FindFirstChildWhichIsA("Model")
-		if not modelInside then return end
-
-		local realShakersFolder = modelInside:FindFirstChild("Shakers")
-		if not realShakersFolder then return end
-
-		playerTrove:Connect(realShakersFolder.ChildAdded, function(child)
-			if child:IsA("Model") then
+		playerTrove:Connect(plotShakers.ChildAdded, function(child)
+			if child:IsA("Folder") then
 				task.defer(function()
 					syncShakers(player)
 				end)
 			end
 		end)
 
-		playerTrove:Connect(realShakersFolder.ChildRemoved, function(child)
-			if child:IsA("Model") then
+		playerTrove:Connect(plotShakers.ChildRemoved, function(child)
+			if child:IsA("Folder") then
 				task.defer(function()
 					syncShakers(player)
 				end)
@@ -147,20 +106,20 @@ local function attachListenersForPlayer(player)
 		playerTrove:Connect(currentPlotValue.Changed, function()
 			task.defer(function()
 				syncShakers(player)
-				connectToPlotModel()
+				connectToPlotShakers()
 			end)
 		end)
 	end
 
 	syncShakers(player)
-	connectToPlotModel()
+	connectToPlotShakers()
 end
 
 mainTrove:Connect(Players.PlayerAdded, function(player)
 	ensurePlayerShakersFolder(player)
 	playerInitialized[player.UserId] = false
 
-	local function initializePlayerWithBillboard()
+	local function initializePlayer()
 		if playerInitialized[player.UserId] then
 			return
 		end
@@ -170,16 +129,7 @@ mainTrove:Connect(Players.PlayerAdded, function(player)
 			return
 		end
 
-		local plotNumber = currentPlotValue.Value
-
-		local loadingData = LoadingBillboard.Show(plotNumber)
-
 		attachListenersForPlayer(player)
-
-		if loadingData then
-			LoadingBillboard.Hide(loadingData)
-		end
-
 		playerInitialized[player.UserId] = true
 	end
 
@@ -188,7 +138,7 @@ mainTrove:Connect(Players.PlayerAdded, function(player)
 		childAddedConn = player.ChildAdded:Connect(function(child)
 			if child.Name == "CurrentPlot" then
 				task.defer(function()
-					initializePlayerWithBillboard()
+					initializePlayer()
 				end)
 				if childAddedConn then
 					childAddedConn:Disconnect()
@@ -202,7 +152,7 @@ mainTrove:Connect(Players.PlayerAdded, function(player)
 		playerTroves[player]:Add(childAddedConn)
 	else
 		task.defer(function()
-			initializePlayerWithBillboard()
+			initializePlayer()
 		end)
 	end
 end)
@@ -220,15 +170,7 @@ for _, player in ipairs(Players:GetPlayers()) do
 	playerInitialized[player.UserId] = false
 
 	if player:FindFirstChild("CurrentPlot") and player.CurrentPlot.Value ~= "" then
-		local plotNumber = player.CurrentPlot.Value
-		local loadingData = LoadingBillboard.Show(plotNumber)
-
 		attachListenersForPlayer(player)
-
-		if loadingData then
-			LoadingBillboard.Hide(loadingData)
-		end
-
 		playerInitialized[player.UserId] = true
 	end
 end

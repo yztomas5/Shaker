@@ -1,85 +1,189 @@
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local Trove = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Data"):WaitForChild("Trove"))
 local ShakerInventory = require(script.Parent.ShakerInventory)
-local ShakerEffects = require(script.Parent.ShakerEffects)
 local ShakerJuice = require(script.Parent.ShakerJuice)
 local ShakerUI = require(script.Parent.ShakerUI)
-local ShakerModel = require(script.Parent.ShakerModel)
 
 local IngredientConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("IngredientConfig"))
 local MutationConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("MutationConfig"))
 
 local warningEvent = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Warn"):WaitForChild("Warning")
 
+local remoteEventsFolder = ReplicatedStorage:WaitForChild("RemoteEvents")
+local shakersEventsFolder = remoteEventsFolder:FindFirstChild("Shakers")
+if not shakersEventsFolder then
+	shakersEventsFolder = Instance.new("Folder")
+	shakersEventsFolder.Name = "Shakers"
+	shakersEventsFolder.Parent = remoteEventsFolder
+end
+
+local updateXpEvent = shakersEventsFolder:FindFirstChild("UpdateXp")
+if not updateXpEvent then
+	updateXpEvent = Instance.new("RemoteEvent")
+	updateXpEvent.Name = "UpdateXp"
+	updateXpEvent.Parent = shakersEventsFolder
+end
+
+local startEffectsEvent = shakersEventsFolder:FindFirstChild("StartEffects")
+if not startEffectsEvent then
+	startEffectsEvent = Instance.new("RemoteEvent")
+	startEffectsEvent.Name = "StartEffects"
+	startEffectsEvent.Parent = shakersEventsFolder
+end
+
+local stopEffectsEvent = shakersEventsFolder:FindFirstChild("StopEffects")
+if not stopEffectsEvent then
+	stopEffectsEvent = Instance.new("RemoteEvent")
+	stopEffectsEvent.Name = "StopEffects"
+	stopEffectsEvent.Parent = shakersEventsFolder
+end
+
+local completeShakeEvent = shakersEventsFolder:FindFirstChild("CompleteShake")
+if not completeShakeEvent then
+	completeShakeEvent = Instance.new("RemoteEvent")
+	completeShakeEvent.Name = "CompleteShake"
+	completeShakeEvent.Parent = shakersEventsFolder
+end
+
+local plotsFolder = Workspace:WaitForChild("Plots")
+
 local ShakerManager = {}
 ShakerManager.ActiveShakes = {}
 local shakeTroves = {}
 
+local function getPlotShakersFolder(player, shakerNumber)
+	local currentPlotValue = player:FindFirstChild("CurrentPlot")
+	if not currentPlotValue then return nil end
+
+	local plotNumber = currentPlotValue.Value
+	if plotNumber == "" then return nil end
+
+	local plotFolder = plotsFolder:FindFirstChild(plotNumber)
+	if not plotFolder then return nil end
+
+	local plotShakersRoot = plotFolder:FindFirstChild("Shakers")
+	if not plotShakersRoot then return nil end
+
+	return plotShakersRoot:FindFirstChild(tostring(shakerNumber))
+end
+
+local function getInfoBillboard(player, shakerNumber)
+	local shakersFolder = getPlotShakersFolder(player, shakerNumber)
+	if not shakersFolder then return nil end
+
+	local infoFolder = shakersFolder:FindFirstChild("Info")
+	if not infoFolder then return nil end
+
+	local billboard = infoFolder:FindFirstChild("BillboardGui")
+	return billboard
+end
+
+local function getModelFolder(player, shakerNumber)
+	local shakersFolder = getPlotShakersFolder(player, shakerNumber)
+	if not shakersFolder then return nil end
+
+	return shakersFolder:FindFirstChild("Model")
+end
+
+local function getIngredientsFolder(player, shakerNumber)
+	local shakersFolder = getPlotShakersFolder(player, shakerNumber)
+	if not shakersFolder then return nil end
+
+	return shakersFolder:FindFirstChild("Ingredients")
+end
+
+local function calculateTotalRequiredXp(ingredientFolders)
+	local totalXp = 0
+	for _, folder in ipairs(ingredientFolders) do
+		local ingredientInfo = IngredientConfig.Ingredients[folder.Name]
+		if ingredientInfo and ingredientInfo.Xp then
+			totalXp = totalXp + ingredientInfo.Xp
+		end
+	end
+	return totalXp
+end
+
+local function getMixedColor(ingredientFolders)
+	local colors = {}
+	for _, folder in ipairs(ingredientFolders) do
+		local ingredientInfo = IngredientConfig.Ingredients[folder.Name]
+		if ingredientInfo and ingredientInfo.Color then
+			table.insert(colors, ingredientInfo.Color)
+		end
+	end
+
+	if #colors == 0 then
+		return Color3.fromRGB(255, 255, 255)
+	end
+
+	local r, g, b = 0, 0, 0
+	for _, c in ipairs(colors) do
+		r = r + c.R
+		g = g + c.G
+		b = b + c.B
+	end
+
+	return Color3.new(r / #colors, g / #colors, b / #colors)
+end
+
+local function updateBillboardDisplay(player, shakerNumber, currentXp, requiredXp, isActive)
+	local billboard = getInfoBillboard(player, shakerNumber)
+	if not billboard then return end
+
+	billboard.Enabled = isActive
+
+	if isActive then
+		local content = billboard:FindFirstChild("Content")
+		if content then
+			local filler = content:FindFirstChild("Filler")
+			local amount = content:FindFirstChild("Amount")
+
+			if filler then
+				local progress = math.clamp(currentXp / requiredXp, 0, 1)
+				filler.Size = UDim2.new(progress, 0, 1, 0)
+			end
+
+			if amount then
+				amount.Text = ShakerUI.FormatXp(currentXp) .. " / " .. ShakerUI.FormatXp(requiredXp)
+			end
+		end
+	end
+end
+
 function ShakerManager.StartShake(player, shakerNumber)
 	local shakeKey = player.UserId .. "_" .. shakerNumber
 
-	if ShakerManager.ActiveShakes[shakeKey] then 
-		return false
-	end
-
 	local ingredientFolders = ShakerInventory.GetIngredientFolders(player, shakerNumber)
-	if #ingredientFolders == 0 then 
+	if #ingredientFolders == 0 then
 		return false
 	end
 
-	local totalDuration = 0
-	for _, folder in ipairs(ingredientFolders) do
-		local ingredientInfo = IngredientConfig.Ingredients[folder.Name]
-		if ingredientInfo then
-			totalDuration = totalDuration + ingredientInfo.ShakeDuration
-		end
-	end
+	local requiredXp = calculateTotalRequiredXp(ingredientFolders)
+	local mixedColor = getMixedColor(ingredientFolders)
 
-	local colors = ShakerEffects.GetIngredientColors(ingredientFolders, IngredientConfig)
-	local mixedColor = ShakerEffects.MixColors(colors)
+	if ShakerManager.ActiveShakes[shakeKey] then
+		ShakerManager.ActiveShakes[shakeKey].requiredXp = requiredXp
+		ShakerManager.ActiveShakes[shakeKey].mixedColor = mixedColor
+		updateBillboardDisplay(player, shakerNumber, ShakerManager.ActiveShakes[shakeKey].currentXp, requiredXp, true)
+		return true
+	end
 
 	ShakerManager.ActiveShakes[shakeKey] = {
-		startTime = tick(),
-		duration = totalDuration,
-		originalDuration = totalDuration,
 		player = player,
 		shakerNumber = shakerNumber,
-		cancelled = false,
+		currentXp = 0,
+		requiredXp = requiredXp,
 		mixedColor = mixedColor,
-		soundClone = nil,
-		contentPart = nil
+		cancelled = false
 	}
 
-	local currentModel = ShakerModel.GetCurrentShakerModel(player, shakerNumber)
-	if not currentModel then
-		ShakerManager.ActiveShakes[shakeKey] = nil
-		return false
-	end
+	updateBillboardDisplay(player, shakerNumber, 0, requiredXp, true)
 
-	local soundClone, contentPart = ShakerEffects.StartShakeEffects(currentModel, mixedColor)
-	ShakerEffects.SetStartButtonColor(currentModel, true)
+	startEffectsEvent:FireClient(player, shakerNumber, mixedColor)
 
-	local shakeData = ShakerManager.ActiveShakes[shakeKey]
-	shakeData.soundClone = soundClone
-	shakeData.contentPart = contentPart
-
-	local startPart = currentModel:FindFirstChild("Start")
-	if startPart then
-		local startPrompt = startPart:FindFirstChild("StartPrompt")
-		if startPrompt then
-			startPrompt.Enabled = false
-		end
-	end
-
-	shakeTroves[shakeKey] = Trove.new()
-
-	task.spawn(function()
-		ShakerManager.UpdateShakeLoop(shakeKey, totalDuration)
-	end)
-
-	-- Notify Load system to update visuals for mixing effects
 	if _G.LoadSystem and _G.LoadSystem.UpdateShakerJuices then
 		task.defer(function()
 			_G.LoadSystem.UpdateShakerJuices(player, shakerNumber)
@@ -89,87 +193,107 @@ function ShakerManager.StartShake(player, shakerNumber)
 	return true
 end
 
-function ShakerManager.ReduceShakeTime(player, shakerNumber, percentage)
+function ShakerManager.StopShake(player, shakerNumber)
 	local shakeKey = player.UserId .. "_" .. shakerNumber
-	local shakeData = ShakerManager.ActiveShakes[shakeKey]
 
+	local shakeData = ShakerManager.ActiveShakes[shakeKey]
 	if not shakeData then
 		return false
 	end
 
-	local elapsed = tick() - shakeData.startTime
-	local currentRemaining = shakeData.duration - elapsed
+	shakeData.cancelled = true
 
-	local reduction = currentRemaining * percentage
-	local newRemaining = math.max(0, currentRemaining - reduction)
+	updateBillboardDisplay(player, shakerNumber, 0, 0, false)
 
-	shakeData.duration = elapsed + newRemaining
+	stopEffectsEvent:FireClient(player, shakerNumber)
+
+	ShakerManager.ActiveShakes[shakeKey] = nil
+	if shakeTroves[shakeKey] then
+		shakeTroves[shakeKey]:Destroy()
+		shakeTroves[shakeKey] = nil
+	end
+
+	if _G.LoadSystem and _G.LoadSystem.ClearAllShakerPartsInstantly then
+		_G.LoadSystem.ClearAllShakerPartsInstantly(player, shakerNumber)
+	end
 
 	return true
 end
 
-function ShakerManager.UpdateShakeLoop(shakeKey, totalDuration)
-	local elapsed = 0
-	local lastModel = nil
-	local startTime = tick()
+function ShakerManager.RecalculateRequiredXp(player, shakerNumber)
+	local shakeKey = player.UserId .. "_" .. shakerNumber
 
-	if not shakeTroves[shakeKey] then
-		shakeTroves[shakeKey] = Trove.new()
+	local shakeData = ShakerManager.ActiveShakes[shakeKey]
+	if not shakeData then
+		return false
 	end
-	local trove = shakeTroves[shakeKey]
 
-	trove:Connect(RunService.Heartbeat, function(dt)
-		local shakeData = ShakerManager.ActiveShakes[shakeKey]
+	local ingredientFolders = ShakerInventory.GetIngredientFolders(player, shakerNumber)
+	if #ingredientFolders == 0 then
+		ShakerManager.StopShake(player, shakerNumber)
+		return false
+	end
 
-		if not shakeData or shakeData.cancelled then
-			trove:Destroy()
-			shakeTroves[shakeKey] = nil
-			return
-		end
+	local newRequiredXp = calculateTotalRequiredXp(ingredientFolders)
+	local newMixedColor = getMixedColor(ingredientFolders)
 
-		elapsed = tick() - startTime
-		local remaining = math.max(0, shakeData.duration - elapsed)
+	shakeData.requiredXp = newRequiredXp
+	shakeData.mixedColor = newMixedColor
 
-		local currentModel = ShakerModel.GetCurrentShakerModel(shakeData.player, shakeData.shakerNumber)
+	if shakeData.currentXp >= newRequiredXp then
+		shakeData.currentXp = newRequiredXp - 1
+	end
 
-		if currentModel ~= lastModel then
-			if lastModel then
-				ShakerEffects.StopShakeEffects(
-					shakeData.soundClone,
-					shakeData.contentPart
-				)
-			end
+	updateBillboardDisplay(player, shakerNumber, shakeData.currentXp, newRequiredXp, true)
 
-			if currentModel then
-				local soundClone, contentPart =
-					ShakerEffects.StartShakeEffects(currentModel, shakeData.mixedColor)
+	startEffectsEvent:FireClient(player, shakerNumber, newMixedColor)
 
-				shakeData.soundClone = soundClone
-				shakeData.contentPart = contentPart
+	if _G.LoadSystem and _G.LoadSystem.UpdateShakerJuices then
+		task.defer(function()
+			_G.LoadSystem.UpdateShakerJuices(player, shakerNumber)
+		end)
+	end
 
-				ShakerEffects.SetStartButtonColor(currentModel, true)
+	return true
+end
 
-				-- Notify Load system to apply mixing visuals when model becomes available
-				if _G.LoadSystem and _G.LoadSystem.UpdateShakerJuices then
-					task.defer(function()
-						_G.LoadSystem.UpdateShakerJuices(shakeData.player, shakeData.shakerNumber)
-					end)
-				end
-			end
+function ShakerManager.AddXp(player, shakerNumber, amount)
+	local shakeKey = player.UserId .. "_" .. shakerNumber
 
-			lastModel = currentModel
-		end
+	local shakeData = ShakerManager.ActiveShakes[shakeKey]
+	if not shakeData or shakeData.cancelled then
+		return false
+	end
 
-		if currentModel then
-			ShakerUI.UpdateStatusDisplay(currentModel, math.ceil(remaining), true)
-		end
+	shakeData.currentXp = shakeData.currentXp + amount
 
-		if elapsed >= shakeData.duration then
-			trove:Destroy()
-			shakeTroves[shakeKey] = nil
-			ShakerManager.CompleteShake(shakeKey)
-		end
-	end)
+	updateXpEvent:FireClient(player, shakerNumber, shakeData.currentXp, shakeData.requiredXp)
+
+	updateBillboardDisplay(player, shakerNumber, shakeData.currentXp, shakeData.requiredXp, true)
+
+	if shakeData.currentXp >= shakeData.requiredXp then
+		ShakerManager.CompleteShake(shakeKey)
+	end
+
+	return true
+end
+
+function ShakerManager.IncreaseRequiredXp(player, shakerNumber, percentage)
+	local shakeKey = player.UserId .. "_" .. shakerNumber
+
+	local shakeData = ShakerManager.ActiveShakes[shakeKey]
+	if not shakeData then
+		return false
+	end
+
+	local increase = math.floor(shakeData.requiredXp * percentage)
+	shakeData.requiredXp = shakeData.requiredXp + increase
+
+	updateBillboardDisplay(player, shakerNumber, shakeData.currentXp, shakeData.requiredXp, true)
+
+	updateXpEvent:FireClient(player, shakerNumber, shakeData.currentXp, shakeData.requiredXp)
+
+	return true
 end
 
 function ShakerManager.CompleteShake(shakeKey)
@@ -180,29 +304,11 @@ function ShakerManager.CompleteShake(shakeKey)
 	local shakerNumber = shakeData.shakerNumber
 	local mixedColor = shakeData.mixedColor
 
-	local finalModel = ShakerModel.GetCurrentShakerModel(player, shakerNumber)
+	updateBillboardDisplay(player, shakerNumber, 0, 0, false)
 
-	if finalModel then
-		finalModel:SetAttribute("Mixing", false)
-		ShakerEffects.StopShakeEffects(
-			shakeData.soundClone,
-			shakeData.contentPart
-		)
-		ShakerEffects.SetStartButtonColor(finalModel, false)
-		ShakerUI.UpdateStatusDisplay(finalModel, 0, false)
+	stopEffectsEvent:FireClient(player, shakerNumber)
+	completeShakeEvent:FireClient(player, shakerNumber, mixedColor)
 
-		ShakerEffects.PlayPourEffect(finalModel, mixedColor)
-
-		local startPart = finalModel:FindFirstChild("Start")
-		if startPart then
-			local startPrompt = startPart:FindFirstChild("StartPrompt")
-			if startPrompt then
-				startPrompt.Enabled = true
-			end
-		end
-	end
-
-	-- Borrar todas las partes instantáneamente antes de crear el jugo
 	if _G.LoadSystem and _G.LoadSystem.ClearAllShakerPartsInstantly then
 		_G.LoadSystem.ClearAllShakerPartsInstantly(player, shakerNumber)
 	end
@@ -210,7 +316,6 @@ function ShakerManager.CompleteShake(shakeKey)
 	local ingredientFolders = ShakerInventory.GetIngredientFolders(player, shakerNumber)
 	ShakerJuice.CreateJuice(player, shakerNumber, ingredientFolders, IngredientConfig, MutationConfig)
 
-	-- Notify player that juice is ready
 	warningEvent:FireClient(player, "Your juice is ready!", "Juice")
 
 	ShakerManager.ActiveShakes[shakeKey] = nil
@@ -219,7 +324,6 @@ function ShakerManager.CompleteShake(shakeKey)
 		shakeTroves[shakeKey] = nil
 	end
 
-	-- Notify Load system to update visuals (restore original colors)
 	if _G.LoadSystem and _G.LoadSystem.UpdateShakerJuices then
 		task.defer(function()
 			_G.LoadSystem.UpdateShakerJuices(player, shakerNumber)
@@ -237,34 +341,10 @@ function ShakerManager.CancelShake(player, shakerNumber)
 
 	shakeData.cancelled = true
 
-	local currentModel = ShakerModel.GetCurrentShakerModel(player, shakerNumber)
+	updateBillboardDisplay(player, shakerNumber, 0, 0, false)
 
-	if currentModel then
-		currentModel:SetAttribute("Mixing", false)
+	stopEffectsEvent:FireClient(player, shakerNumber)
 
-		-- Reproducir sonido Remove al cancelar
-		local contentPart = ShakerModel.GetContentPart(currentModel)
-		if contentPart then
-			ShakerEffects.PlayRemoveIngredientSound(contentPart)
-		end
-
-		ShakerEffects.StopShakeEffects(
-			shakeData.soundClone,
-			shakeData.contentPart
-		)
-		ShakerEffects.SetStartButtonColor(currentModel, false)
-		ShakerUI.UpdateStatusDisplay(currentModel, 0, false)
-
-		local startPart = currentModel:FindFirstChild("Start")
-		if startPart then
-			local startPrompt = startPart:FindFirstChild("StartPrompt")
-			if startPrompt then
-				startPrompt.Enabled = true
-			end
-		end
-	end
-
-	-- Borrar todas las partes instantáneamente al cancelar
 	if _G.LoadSystem and _G.LoadSystem.ClearAllShakerPartsInstantly then
 		_G.LoadSystem.ClearAllShakerPartsInstantly(player, shakerNumber)
 	end
@@ -277,7 +357,6 @@ function ShakerManager.CancelShake(player, shakerNumber)
 		shakeTroves[shakeKey] = nil
 	end
 
-	-- Notify Load system to update visuals (restore original colors)
 	if _G.LoadSystem and _G.LoadSystem.UpdateShakerJuices then
 		task.defer(function()
 			_G.LoadSystem.UpdateShakerJuices(player, shakerNumber)
@@ -290,6 +369,47 @@ end
 function ShakerManager.IsShakeActive(player, shakerNumber)
 	local shakeKey = player.UserId .. "_" .. shakerNumber
 	return ShakerManager.ActiveShakes[shakeKey] ~= nil
+end
+
+function ShakerManager.GetShakeData(player, shakerNumber)
+	local shakeKey = player.UserId .. "_" .. shakerNumber
+	return ShakerManager.ActiveShakes[shakeKey]
+end
+
+function ShakerManager.RestoreShake(player, shakerNumber, currentXp, requiredXp)
+	local shakeKey = player.UserId .. "_" .. shakerNumber
+
+	if ShakerManager.ActiveShakes[shakeKey] then
+		return false
+	end
+
+	local ingredientFolders = ShakerInventory.GetIngredientFolders(player, shakerNumber)
+	if #ingredientFolders == 0 then
+		return false
+	end
+
+	local mixedColor = getMixedColor(ingredientFolders)
+
+	ShakerManager.ActiveShakes[shakeKey] = {
+		player = player,
+		shakerNumber = shakerNumber,
+		currentXp = currentXp,
+		requiredXp = requiredXp,
+		mixedColor = mixedColor,
+		cancelled = false
+	}
+
+	updateBillboardDisplay(player, shakerNumber, currentXp, requiredXp, true)
+
+	startEffectsEvent:FireClient(player, shakerNumber, mixedColor)
+
+	if _G.LoadSystem and _G.LoadSystem.UpdateShakerJuices then
+		task.defer(function()
+			_G.LoadSystem.UpdateShakerJuices(player, shakerNumber)
+		end)
+	end
+
+	return true
 end
 
 return ShakerManager

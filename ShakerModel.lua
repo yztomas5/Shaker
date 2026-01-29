@@ -4,7 +4,7 @@ local ShakerModel = {}
 
 local plotsFolder = Workspace:WaitForChild("Plots")
 
-function ShakerModel.GetCurrentShakerModel(player, shakerNumber)
+function ShakerModel.GetPlotShakersFolder(player)
 	local currentPlotValue = player:FindFirstChild("CurrentPlot")
 	if not currentPlotValue then return nil end
 
@@ -14,26 +14,42 @@ function ShakerModel.GetCurrentShakerModel(player, shakerNumber)
 	local plotFolder = plotsFolder:FindFirstChild(plotNumber)
 	if not plotFolder then return nil end
 
-	local plotShakersRoot = plotFolder:FindFirstChild("Shakers")
-	if not plotShakersRoot then return nil end
-
-	local modelInside = plotShakersRoot:FindFirstChildWhichIsA("Model")
-	if not modelInside then return nil end
-
-	local realShakersFolder = modelInside:FindFirstChild("Shakers")
-	if not realShakersFolder then return nil end
-
-	return realShakersFolder:FindFirstChild(tostring(shakerNumber))
+	return plotFolder:FindFirstChild("Shakers")
 end
 
-function ShakerModel.GetContentPart(shakerModel)
-	if not shakerModel then return nil end
+function ShakerModel.GetShakerFolder(player, shakerNumber)
+	local plotShakers = ShakerModel.GetPlotShakersFolder(player)
+	if not plotShakers then return nil end
 
-	local juicesFolder = shakerModel:FindFirstChild("Juices")
-	if not juicesFolder then return nil end
+	return plotShakers:FindFirstChild(tostring(shakerNumber))
+end
 
-	local contentPart = juicesFolder:FindFirstChild("Content")
-	return contentPart
+function ShakerModel.GetCurrentShakerModel(player, shakerNumber)
+	-- For backwards compatibility, returns the shaker folder
+	return ShakerModel.GetShakerFolder(player, shakerNumber)
+end
+
+function ShakerModel.GetContentPart(shakerFolder)
+	if not shakerFolder then return nil end
+
+	local ingredientsFolder = shakerFolder:FindFirstChild("Ingredients")
+	if not ingredientsFolder then return nil end
+
+	return ingredientsFolder:FindFirstChild("Content")
+end
+
+function ShakerModel.GetModelFolder(shakerFolder)
+	if not shakerFolder then return nil end
+	return shakerFolder:FindFirstChild("Model")
+end
+
+function ShakerModel.GetInfoBillboard(shakerFolder)
+	if not shakerFolder then return nil end
+
+	local infoFolder = shakerFolder:FindFirstChild("Info")
+	if not infoFolder then return nil end
+
+	return infoFolder:FindFirstChild("BillboardGui")
 end
 
 function ShakerModel.GetPlayerForPlot(plotNumber)

@@ -2,6 +2,30 @@ local TweenService = game:GetService("TweenService")
 
 local ShakerUI = {}
 
+local SUFFIXES = {"", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"}
+
+function ShakerUI.FormatXp(xp)
+	if xp < 1000 then
+		return tostring(math.floor(xp)) .. " Xp"
+	end
+
+	local suffixIndex = 1
+	local value = xp
+
+	while value >= 1000 and suffixIndex < #SUFFIXES do
+		value = value / 1000
+		suffixIndex = suffixIndex + 1
+	end
+
+	if value >= 100 then
+		return string.format("%.0f%s Xp", value, SUFFIXES[suffixIndex])
+	elseif value >= 10 then
+		return string.format("%.1f%s Xp", value, SUFFIXES[suffixIndex])
+	else
+		return string.format("%.2f%s Xp", value, SUFFIXES[suffixIndex])
+	end
+end
+
 function ShakerUI.FormatTime(seconds)
 	local hours = math.floor(seconds / 3600)
 	local minutes = math.floor((seconds % 3600) / 60)
@@ -26,15 +50,12 @@ function ShakerUI.UpdateStatusDisplay(shakerModel, timeRemaining, isShaking)
 		status.Visible = true
 		status.Text = ShakerUI.FormatTime(timeRemaining)
 
-		-- Si no estaba visible antes, animar la aparición
 		if not wasVisible then
-			-- Guardar el tamaño original si no está guardado
 			local originalSize = status:GetAttribute("OriginalSize")
 			if not originalSize then
 				status:SetAttribute("OriginalSize", tostring(status.Size))
 			end
 
-			-- Empezar diminuto
 			status.Size = UDim2.new(0.01, 0, 0.01, 0)
 
 			local tweenInfo = TweenInfo.new(
@@ -43,18 +64,15 @@ function ShakerUI.UpdateStatusDisplay(shakerModel, timeRemaining, isShaking)
 				Enum.EasingDirection.Out
 			)
 
-			-- Obtener el tamaño original guardado
 			local targetSizeStr = status:GetAttribute("OriginalSize")
 			local targetSize
 			if targetSizeStr then
-				-- Parsear el string del UDim2
 				local x, xo, y, yo = targetSizeStr:match("{(%d+%.?%d*), (%d+)}, {(%d+%.?%d*), (%d+)}")
 				if x and xo and y and yo then
 					targetSize = UDim2.new(tonumber(x), tonumber(xo), tonumber(y), tonumber(yo))
 				end
 			end
 
-			-- Si no pudimos parsear, usar tamaño completo
 			if not targetSize then
 				targetSize = UDim2.new(1, 0, 1, 0)
 			end
@@ -66,7 +84,6 @@ function ShakerUI.UpdateStatusDisplay(shakerModel, timeRemaining, isShaking)
 			tween:Play()
 		end
 	else
-		-- Si estaba visible, animar la salida
 		if status.Visible then
 			local tweenInfo = TweenInfo.new(
 				0.3,
