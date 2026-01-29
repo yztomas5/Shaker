@@ -1,29 +1,36 @@
 --[[
 	ShakerClient - LocalScript del cliente
-	Maneja efectos visuales de mezcla (gelatina)
+	- Click en modelo del shaker para añadir ingredientes
+	- Highlight cuando tiene ingrediente en mano
+	- Efectos visuales de mezcla (gelatina)
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
+local mouse = player:GetMouse()
 local plotsFolder = Workspace:WaitForChild("Plots")
 
 -- Esperar eventos
 local shakersFolder = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Shakers")
-local StartMixing = shakersFolder:WaitForChild("StartMixing")
-local StopMixing = shakersFolder:WaitForChild("StopMixing")
-local UpdateProgress = shakersFolder:WaitForChild("UpdateProgress")
-local CompleteMixing = shakersFolder:WaitForChild("CompleteMixing")
+local StartMixingEvent = shakersFolder:WaitForChild("StartMixing")
+local StopMixingEvent = shakersFolder:WaitForChild("StopMixing")
+local UpdateProgressEvent = shakersFolder:WaitForChild("UpdateProgress")
+local CompleteMixingEvent = shakersFolder:WaitForChild("CompleteMixing")
+local ShakerClickEvent = shakersFolder:WaitForChild("ShakerClick")
 
 -- Config de ingredientes
 local IngredientConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("IngredientConfig"))
 
 -- Estado
 local ActiveEffects = {} -- [shakerNumber] = {parts, connection, mixedColor}
+local CurrentHighlight = nil -- Highlight actual
+local CurrentHoveredModel = nil -- Modelo actualmente bajo el mouse
 
 ------------------------------------------------------------------------
 -- UTILIDADES
@@ -68,8 +75,67 @@ local function getIngredientNames(shakerNumber)
 	return names
 end
 
+local function getEquippedTool()
+	local character = player.Character
+	if not character then return nil end
+	return character:FindFirstChildOfClass("Tool")
+end
+
+local function isIngredientTool(tool)
+	if not tool then return false end
+	local typeValue = tool:FindFirstChild("Type")
+	return typeValue and typeValue:IsA("StringValue") and typeValue.Value == "Ingredient"
+end
+
+local function findShakerModelFromPart(part)
+	-- Buscar hacia arriba hasta encontrar un modelo con atributos de shaker
+	local current = part
+	while current and current ~= Workspace do
+		if current:IsA("Model") then
+			local shakerNum = current:GetAttribute("ShakerNumber")
+			local plotNum = current:GetAttribute("PlotNumber")
+			if shakerNum and plotNum then
+				return current, shakerNum, plotNum
+			end
+		end
+		current = current.Parent
+	end
+	return nil, nil, nil
+end
+
 ------------------------------------------------------------------------
--- EFECTOS VISUALES
+-- HIGHLIGHT
+------------------------------------------------------------------------
+
+local function clearHighlight()
+	if CurrentHighlight then
+		CurrentHighlight:Destroy()
+		CurrentHighlight = nil
+	end
+	CurrentHoveredModel = nil
+end
+
+local function applyHighlight(model)
+	if CurrentHoveredModel == model then return end
+
+	clearHighlight()
+
+	CurrentHoveredModel = model
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "ShakerHighlight"
+	highlight.FillColor = Color3.fromRGB(100, 255, 100)
+	highlight.FillTransparency = 0.7
+	highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+	highlight.OutlineTransparency = 0
+	highlight.Adornee = model
+	highlight.Parent = model
+
+	CurrentHighlight = highlight
+end
+
+------------------------------------------------------------------------
+-- EFECTOS VISUALES DE MEZCLA
 ------------------------------------------------------------------------
 
 local function clearContent(contentPart)
@@ -102,7 +168,6 @@ local function createJuiceParts(contentPart, ingredientNames, mixedColor)
 			part.CanCollide = false
 			part.Material = Enum.Material.SmoothPlastic
 
-			-- Color con variación
 			local variation = -0.15 + math.random() * 0.3
 			if variation > 0 then
 				part.Color = mixedColor:Lerp(Color3.new(1, 1, 1), variation)
@@ -113,7 +178,6 @@ local function createJuiceParts(contentPart, ingredientNames, mixedColor)
 			local finalSize = Vector3.new(contentSize.X, partHeight, contentSize.Z)
 			part:SetAttribute("BaseSize", tostring(finalSize))
 
-			-- Empezar pequeño
 			part.Size = finalSize * 0.01
 
 			local offsetY = -(contentSize.Y / 2) + (partHeight / 2) + ((i - 1) * partHeight)
@@ -121,7 +185,6 @@ local function createJuiceParts(contentPart, ingredientNames, mixedColor)
 
 			part.Parent = contentPart
 
-			-- Animar entrada
 			local tween = TweenService:Create(part, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 				Size = finalSize
 			})
@@ -137,7 +200,6 @@ end
 local function startJellyEffect(shakerNumber, parts, mixedColor)
 	if #parts == 0 then return end
 
-	-- Efecto de color
 	for _, part in ipairs(parts) do
 		task.spawn(function()
 			while ActiveEffects[shakerNumber] and part.Parent do
@@ -160,7 +222,6 @@ local function startJellyEffect(shakerNumber, parts, mixedColor)
 		end)
 	end
 
-	-- Efecto de pulso
 	local connection = RunService.Heartbeat:Connect(function()
 		for _, part in ipairs(parts) do
 			if part.Parent and math.random() < 0.03 then
@@ -203,7 +264,6 @@ local function stopEffects(shakerNumber)
 
 	local contentPart = getContentPart(shakerNumber)
 	if contentPart then
-		-- Animar salida
 		for _, part in ipairs(effectData.parts or {}) do
 			if part.Parent then
 				local tween = TweenService:Create(part, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
@@ -221,11 +281,10 @@ local function stopEffects(shakerNumber)
 end
 
 ------------------------------------------------------------------------
--- EVENTOS
+-- EVENTOS DEL SERVIDOR
 ------------------------------------------------------------------------
 
-StartMixing.OnClientEvent:Connect(function(shakerNumber, mixedColor)
-	-- Detener efectos anteriores
+StartMixingEvent.OnClientEvent:Connect(function(shakerNumber, mixedColor)
 	stopEffects(shakerNumber)
 
 	local contentPart = getContentPart(shakerNumber)
@@ -247,11 +306,11 @@ StartMixing.OnClientEvent:Connect(function(shakerNumber, mixedColor)
 	end
 end)
 
-StopMixing.OnClientEvent:Connect(function(shakerNumber)
+StopMixingEvent.OnClientEvent:Connect(function(shakerNumber)
 	stopEffects(shakerNumber)
 end)
 
-CompleteMixing.OnClientEvent:Connect(function(shakerNumber, mixedColor)
+CompleteMixingEvent.OnClientEvent:Connect(function(shakerNumber, mixedColor)
 	stopEffects(shakerNumber)
 
 	local contentPart = getContentPart(shakerNumber)
@@ -260,8 +319,47 @@ CompleteMixing.OnClientEvent:Connect(function(shakerNumber, mixedColor)
 	end
 end)
 
-UpdateProgress.OnClientEvent:Connect(function(shakerNumber, currentXp, requiredXp)
-	-- Actualización de progreso manejada por el servidor en Billboard
+------------------------------------------------------------------------
+-- CLICK Y HOVER
+------------------------------------------------------------------------
+
+-- Detectar hover para highlight
+RunService.RenderStepped:Connect(function()
+	local target = mouse.Target
+	if not target then
+		clearHighlight()
+		return
+	end
+
+	local model, shakerNum, plotNum = findShakerModelFromPart(target)
+
+	if model then
+		local tool = getEquippedTool()
+		-- Mostrar highlight si tiene ingrediente o energizante en mano
+		if tool and (isIngredientTool(tool) or tool.Name:find("Energizing")) then
+			applyHighlight(model)
+		else
+			clearHighlight()
+		end
+	else
+		clearHighlight()
+	end
+end)
+
+-- Detectar click
+mouse.Button1Down:Connect(function()
+	local target = mouse.Target
+	if not target then return end
+
+	local model, shakerNum, plotNum = findShakerModelFromPart(target)
+
+	if model and shakerNum and plotNum then
+		-- Verificar que es nuestro plot
+		local currentPlot = player:FindFirstChild("CurrentPlot")
+		if currentPlot and currentPlot.Value == plotNum then
+			ShakerClickEvent:FireServer(shakerNum, plotNum)
+		end
+	end
 end)
 
 ------------------------------------------------------------------------
@@ -282,7 +380,6 @@ local function watchShakerFolder(shakerFolder, shakerNumber)
 			return
 		end
 
-		-- Recrear partes
 		if effectData.connection then
 			effectData.connection:Disconnect()
 		end

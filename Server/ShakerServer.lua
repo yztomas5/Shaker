@@ -5,8 +5,8 @@
 	Plots/{PlotNumber}/Shakers/{ShakerNumber}/
 		├─ Ingredients/Content
 		├─ Info/BillboardGui/Content/{Filler, Amount}
-		├─ Add (Part)
-		└─ TouchPart (Part)
+		├─ Model/Model (el modelo visual del shaker - click para añadir)
+		└─ TouchPart (Part para añadir XP)
 ]]
 
 local Players = game:GetService("Players")
@@ -54,14 +54,19 @@ local StartMixingEvent = getOrCreateEvent("StartMixing")
 local StopMixingEvent = getOrCreateEvent("StopMixing")
 local UpdateProgressEvent = getOrCreateEvent("UpdateProgress")
 local CompleteMixingEvent = getOrCreateEvent("CompleteMixing")
+local ShakerClickEvent = getOrCreateEvent("ShakerClick") -- Cliente -> Servidor
 
 local warningEvent = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Warn"):WaitForChild("Warning")
 
 -- Estado global
 local ActiveShakes = {}
 local TouchCooldowns = {}
+local ClickCooldowns = {}
 
 local plotsFolder = Workspace:WaitForChild("Plots")
+
+-- Mapeo de modelos a shakers
+local ModelToShaker = {} -- [model] = {plotNumber, shakerNumber}
 
 ------------------------------------------------------------------------
 -- BILLBOARD
@@ -69,10 +74,7 @@ local plotsFolder = Workspace:WaitForChild("Plots")
 
 local function updateBillboard(player, shakerNumber, currentXp, requiredXp, enabled)
 	local billboard = Utils.GetBillboard(player, shakerNumber)
-	if not billboard then
-		print("[ShakerServer] Billboard no encontrado para shaker", shakerNumber)
-		return
-	end
+	if not billboard then return end
 
 	billboard.Enabled = enabled
 
@@ -204,15 +206,19 @@ local function addXp(player, shakerNumber, amount)
 end
 
 ------------------------------------------------------------------------
--- INTERACCIÓN ADD
+-- CLICK EN MODELO (añadir/remover ingrediente)
 ------------------------------------------------------------------------
 
-local function onAddTriggered(player, shakerNumber, plotNumber)
+local function handleShakerClick(player, shakerNumber, plotNumber)
+	-- Verificar plot
 	local currentPlot = player:FindFirstChild("CurrentPlot")
-	if not currentPlot or currentPlot.Value ~= plotNumber then
-		print("[ShakerServer] Plot incorrecto")
-		return
-	end
+	if not currentPlot or currentPlot.Value ~= plotNumber then return end
+
+	-- Cooldown
+	local now = tick()
+	local lastClick = ClickCooldowns[player.UserId] or 0
+	if now - lastClick < Config.INTERACTION_COOLDOWN then return end
+	ClickCooldowns[player.UserId] = now
 
 	local character = player.Character
 	if not character then return end
@@ -222,7 +228,7 @@ local function onAddTriggered(player, shakerNumber, plotNumber)
 	local tool = Utils.GetEquippedTool(character)
 	local count = Inventory.Count(player, shakerNumber)
 
-	print("[ShakerServer] Add triggered - isActive:", isActive, "tool:", tool and tool.Name, "count:", count)
+	print("[ShakerServer] Click en shaker - isActive:", isActive, "tool:", tool and tool.Name, "count:", count)
 
 	-- Energizante durante mezcla
 	if isActive and tool then
@@ -246,8 +252,8 @@ local function onAddTriggered(player, shakerNumber, plotNumber)
 		end
 	end
 
-	-- Cancelar mezcla
-	if isActive then
+	-- Cancelar mezcla (click sin herramienta durante mezcla)
+	if isActive and not tool then
 		print("[ShakerServer] Cancelando mezcla")
 		stopMixing(player, shakerNumber, true)
 		return
@@ -266,20 +272,20 @@ local function onAddTriggered(player, shakerNumber, plotNumber)
 		end
 	end
 
-	-- Remover ingrediente
-	if count > 0 then
+	-- Remover ingrediente (click sin herramienta, no mezclando)
+	if not tool and count > 0 and not isActive then
 		print("[ShakerServer] Removiendo ingrediente")
 		Inventory.RemoveLast(player, shakerNumber)
-
-		local newCount = Inventory.Count(player, shakerNumber)
-		if newCount > 0 then
-			startMixing(player, shakerNumber)
-		end
 	end
 end
 
+-- Escuchar evento de click del cliente
+ShakerClickEvent.OnServerEvent:Connect(function(player, shakerNumber, plotNumber)
+	handleShakerClick(player, shakerNumber, plotNumber)
+end)
+
 ------------------------------------------------------------------------
--- TOUCH PART
+-- TOUCH PART (añadir XP)
 ------------------------------------------------------------------------
 
 local function onTouchPart(player, shakerNumber, plotNumber)
@@ -304,32 +310,25 @@ end
 local function setupShaker(shakerFolder, shakerNumber, plotNumber)
 	print("[ShakerServer] Setup shaker:", plotNumber, shakerNumber)
 
-	local addPart = shakerFolder:FindFirstChild("Add")
+	local modelFolder = shakerFolder:FindFirstChild("Model")
 	local touchPart = shakerFolder:FindFirstChild("TouchPart")
 
-	if addPart then
-		-- Buscar o crear prompt
-		local prompt = addPart:FindFirstChildOfClass("ProximityPrompt")
-		if not prompt then
-			prompt = Instance.new("ProximityPrompt")
-			prompt.Name = "Prompt"
-			prompt.ActionText = "Interact"
-			prompt.ObjectText = "Shaker"
-			prompt.HoldDuration = 0.2
-			prompt.MaxActivationDistance = 8
-			prompt.RequiresLineOfSight = false
-			prompt.Parent = addPart
+	-- Registrar el modelo para que el cliente pueda identificarlo
+	if modelFolder then
+		local model = modelFolder:FindFirstChildOfClass("Model")
+		if model then
+			-- Guardar referencia para mapeo
+			model:SetAttribute("ShakerNumber", shakerNumber)
+			model:SetAttribute("PlotNumber", plotNumber)
+			print("[ShakerServer] Modelo configurado con atributos")
+		else
+			print("[ShakerServer] ADVERTENCIA: No se encontró Model dentro de Model folder")
 		end
-
-		prompt.Triggered:Connect(function(triggerPlayer)
-			onAddTriggered(triggerPlayer, shakerNumber, plotNumber)
-		end)
-
-		print("[ShakerServer] ProximityPrompt configurado en Add")
 	else
-		print("[ShakerServer] ADVERTENCIA: No se encontró parte Add")
+		print("[ShakerServer] ADVERTENCIA: No se encontró folder Model")
 	end
 
+	-- TouchPart para XP
 	if touchPart then
 		touchPart.Touched:Connect(function(hit)
 			local character = hit.Parent
@@ -392,7 +391,6 @@ local function syncPlayerShakers(player)
 	local shakersRoot = plotFolder:FindFirstChild("Shakers")
 	if not shakersRoot then return end
 
-	-- Obtener shakers deseados
 	local desired = {}
 	for _, child in ipairs(shakersRoot:GetChildren()) do
 		if child:IsA("Folder") then
@@ -400,14 +398,12 @@ local function syncPlayerShakers(player)
 		end
 	end
 
-	-- Eliminar los que sobran
 	for _, folder in ipairs(playerShakers:GetChildren()) do
 		if folder:IsA("Folder") and not desired[folder.Name] then
 			folder:Destroy()
 		end
 	end
 
-	-- Crear los que faltan
 	for name in pairs(desired) do
 		if not playerShakers:FindFirstChild(name) then
 			local f = Instance.new("Folder")
@@ -428,6 +424,7 @@ local function onPlayerAdded(player)
 
 	Data.EnsureShakersFolder(player)
 	TouchCooldowns[player.UserId] = 0
+	ClickCooldowns[player.UserId] = 0
 
 	local currentPlot = player:WaitForChild("CurrentPlot", 15)
 	if not currentPlot then
@@ -475,8 +472,8 @@ local function onPlayerRemoving(player)
 
 	Data.Save(player, ActiveShakes)
 	TouchCooldowns[player.UserId] = nil
+	ClickCooldowns[player.UserId] = nil
 
-	-- Limpiar mezclas activas
 	local prefix = tostring(player.UserId) .. "_"
 	for key in pairs(ActiveShakes) do
 		if key:sub(1, #prefix) == prefix then
@@ -489,7 +486,6 @@ end
 -- INICIALIZACIÓN
 ------------------------------------------------------------------------
 
--- Setup plots existentes
 for _, plotFolder in ipairs(plotsFolder:GetChildren()) do
 	task.spawn(function()
 		setupPlot(plotFolder)
@@ -501,7 +497,6 @@ plotsFolder.ChildAdded:Connect(function(plotFolder)
 	setupPlot(plotFolder)
 end)
 
--- Jugadores
 Players.PlayerAdded:Connect(onPlayerAdded)
 Players.PlayerRemoving:Connect(onPlayerRemoving)
 
@@ -509,7 +504,6 @@ for _, player in ipairs(Players:GetPlayers()) do
 	task.spawn(onPlayerAdded, player)
 end
 
--- Auto-guardado
 task.spawn(function()
 	while true do
 		task.wait(120)
