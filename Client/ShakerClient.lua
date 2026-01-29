@@ -35,6 +35,11 @@ local UpdateProgressEvent = shakersFolder:WaitForChild("UpdateProgress")
 local CompleteMixingEvent = shakersFolder:WaitForChild("CompleteMixing")
 local ShakerClickEvent = shakersFolder:WaitForChild("ShakerClick")
 local TouchPartClickEvent = shakersFolder:WaitForChild("TouchPartClick")
+local CancelMixingEvent = shakersFolder:WaitForChild("CancelMixing")
+
+-- GUI de Warning
+local warnGui = player:WaitForChild("PlayerGui"):WaitForChild("Warn")
+local warningFrame = warnGui:WaitForChild("Warning")
 
 -- Config de ingredientes
 local IngredientConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("IngredientConfig"))
@@ -43,6 +48,8 @@ local IngredientConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitF
 local mainTrove = Trove.new()
 local currentPlotTrove = nil
 local currentTouchPart = nil
+local currentRemovePart = nil
+local cancelPopupTrove = nil
 
 local ActiveEffects = {}
 local CurrentHighlight = nil
@@ -379,6 +386,87 @@ local function onTouchPartClick()
 end
 
 ------------------------------------------------------------------------
+-- CANCEL POPUP (con efecto de popup)
+------------------------------------------------------------------------
+
+local function closePopup()
+	if cancelPopupTrove then
+		cancelPopupTrove:Destroy()
+		cancelPopupTrove = nil
+	end
+
+	-- Efecto de cerrar popup
+	local tweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+	local tween = TweenService:Create(warningFrame, tweenInfo, {
+		Size = UDim2.new(0, 0, 0, 0),
+		Position = UDim2.new(0.5, 0, 0.5, 0)
+	})
+	tween:Play()
+	tween.Completed:Connect(function()
+		warningFrame.Visible = false
+	end)
+end
+
+local function openPopup()
+	if cancelPopupTrove then
+		cancelPopupTrove:Destroy()
+	end
+	cancelPopupTrove = mainTrove:Extend()
+
+	-- Guardar tamaño original
+	local originalSize = warningFrame:GetAttribute("OriginalSize")
+	if not originalSize then
+		originalSize = warningFrame.Size
+		warningFrame:SetAttribute("OriginalSize", originalSize)
+	end
+
+	-- Preparar para animación
+	warningFrame.Size = UDim2.new(0, 0, 0, 0)
+	warningFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+	warningFrame.Visible = true
+
+	-- Efecto de abrir popup
+	local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+	local tween = TweenService:Create(warningFrame, tweenInfo, {
+		Size = originalSize,
+		Position = UDim2.new(0.5, -originalSize.X.Offset / 2, 0.5, -originalSize.Y.Offset / 2)
+	})
+	tween:Play()
+
+	-- Conectar botones
+	local optionsFrame = warningFrame:FindFirstChild("Options")
+	if optionsFrame then
+		local yesButton = optionsFrame:FindFirstChild("Yes")
+		local noButton = optionsFrame:FindFirstChild("No")
+
+		if yesButton then
+			cancelPopupTrove:Connect(yesButton.MouseButton1Click, function()
+				closePopup()
+				local plotNumber = getCurrentPlotNumber()
+				if plotNumber then
+					CancelMixingEvent:FireServer(plotNumber)
+				end
+			end)
+		end
+
+		if noButton then
+			cancelPopupTrove:Connect(noButton.MouseButton1Click, function()
+				closePopup()
+			end)
+		end
+	end
+end
+
+------------------------------------------------------------------------
+-- REMOVEPART CLICK (cancelar mezcla)
+------------------------------------------------------------------------
+
+local function onRemovePartClick()
+	-- Mostrar popup de confirmación
+	openPopup()
+end
+
+------------------------------------------------------------------------
 -- CLICK EN MODELO (para añadir ingredientes)
 ------------------------------------------------------------------------
 
@@ -426,8 +514,17 @@ local function loadPlotEffects(plotName)
 		currentPlotTrove = nil
 	end
 
+	if cancelPopupTrove then
+		cancelPopupTrove:Destroy()
+		cancelPopupTrove = nil
+	end
+
 	currentTouchPart = nil
+	currentRemovePart = nil
 	clearHighlight()
+
+	-- Cerrar popup si está abierto
+	warningFrame.Visible = false
 
 	if not plotName or plotName == "" then
 		return
@@ -441,10 +538,18 @@ local function loadPlotEffects(plotName)
 
 	currentPlotTrove = mainTrove:Extend()
 
+	-- Setup TouchPart
 	local touchPart = shakerFolder:FindFirstChild("TouchPart")
 	if touchPart then
 		currentTouchPart = touchPart
 		ShakerButton.setup(touchPart, currentPlotTrove, onTouchPartClick)
+	end
+
+	-- Setup RemovePart
+	local removePart = shakerFolder:FindFirstChild("RemovePart")
+	if removePart then
+		currentRemovePart = removePart
+		ShakerButton.setup(removePart, currentPlotTrove, onRemovePartClick)
 	end
 end
 

@@ -56,6 +56,7 @@ local UpdateProgressEvent = getOrCreateEvent("UpdateProgress")
 local CompleteMixingEvent = getOrCreateEvent("CompleteMixing")
 local ShakerClickEvent = getOrCreateEvent("ShakerClick")
 local TouchPartClickEvent = getOrCreateEvent("TouchPartClick")
+local CancelMixingEvent = getOrCreateEvent("CancelMixing")
 
 local warningEvent = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Warn"):WaitForChild("Warning")
 
@@ -262,7 +263,7 @@ local function handleShakerClick(player, plotNumber)
 
 	print("[ShakerServer] Click en shaker - isActive:", isActive, "tool:", tool and tool.Name, "count:", count)
 
-	-- Energizante durante mezcla
+	-- Energizante durante mezcla (suma XP basado en % del total requerido)
 	if isActive and tool then
 		local percent = Config.ENERGIZERS[tool.Name]
 		if percent then
@@ -274,11 +275,18 @@ local function handleShakerClick(player, plotNumber)
 				gear:Destroy()
 
 				local data = ActiveShakes[key]
-				local increase = math.floor(data.requiredXp * percent)
-				data.requiredXp = data.requiredXp + increase
+				local xpToAdd = math.floor(data.requiredXp * percent)
+				data.currentXp = data.currentXp + xpToAdd
+
+				print("[ShakerServer] Energizante añadió", xpToAdd, "XP. Ahora:", data.currentXp, "/", data.requiredXp)
 
 				updateBillboard(player, data.currentXp, data.requiredXp, true)
 				UpdateProgressEvent:FireClient(player, data.currentXp, data.requiredXp)
+
+				-- Verificar si se completó
+				if data.currentXp >= data.requiredXp then
+					completeMixing(player)
+				end
 				return
 			end
 		end
@@ -328,6 +336,25 @@ end
 
 TouchPartClickEvent.OnServerEvent:Connect(function(player, plotNumber)
 	handleTouchPartClick(player, plotNumber)
+end)
+
+------------------------------------------------------------------------
+-- CANCEL MIXING (RemovePart)
+------------------------------------------------------------------------
+
+local function handleCancelMixing(player, plotNumber)
+	local currentPlotNumber = getPlotNumber(player)
+	if not currentPlotNumber or currentPlotNumber ~= plotNumber then return end
+
+	local key = player.UserId
+	if not ActiveShakes[key] then return end
+
+	print("[ShakerServer] Cancelando mezcla para:", player.Name)
+	stopMixing(player, true)
+end
+
+CancelMixingEvent.OnServerEvent:Connect(function(player, plotNumber)
+	handleCancelMixing(player, plotNumber)
 end)
 
 ------------------------------------------------------------------------
