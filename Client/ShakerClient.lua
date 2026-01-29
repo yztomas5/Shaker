@@ -344,14 +344,13 @@ StartMixingEvent.OnClientEvent:Connect(function(mixedColor)
 
 	local parts = createJuiceParts(contentPart, ingredientNames, mixedColor)
 
-	-- Iniciar efectos de sonido y partículas de burbujas
-	local soundClone, _ = ShakerEffects.StartShakeEffects(contentPart, mixedColor)
+	-- Iniciar partículas de burbujas
+	ShakerEffects.StartShakeEffects(contentPart, mixedColor)
 
 	ActiveEffects = {
 		active = true,
 		parts = parts,
-		mixedColor = mixedColor,
-		soundClone = soundClone
+		mixedColor = mixedColor
 	}
 
 	local connection = startJellyEffect(parts, mixedColor)
@@ -361,13 +360,9 @@ end)
 StopMixingEvent.OnClientEvent:Connect(function()
 	local contentPart = getContentPart()
 
-	-- Detener efectos de burbujas con fade
-	if ActiveEffects.soundClone then
-		ShakerEffects.StopShakeEffects(ActiveEffects.soundClone, contentPart)
-	end
-
-	-- Sonido de remover
+	-- Detener partículas
 	if contentPart then
+		ShakerEffects.StopShakeEffects(contentPart)
 		ShakerEffects.PlayRemoveIngredientSound(contentPart)
 	end
 
@@ -375,7 +370,13 @@ StopMixingEvent.OnClientEvent:Connect(function()
 end)
 
 CompleteMixingEvent.OnClientEvent:Connect(function(mixedColor)
-	-- Solo detener efectos sin animaciones adicionales
+	local contentPart = getContentPart()
+
+	-- Detener partículas
+	if contentPart then
+		ShakerEffects.StopShakeEffects(contentPart)
+	end
+
 	stopEffects()
 end)
 

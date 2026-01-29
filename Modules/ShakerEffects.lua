@@ -4,7 +4,6 @@
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 
 local Trove = require(ReplicatedStorage.Modules.Data.Trove)
 
@@ -17,7 +16,6 @@ local shakerVFXFolder = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("V
 -- Sonidos
 local addIngredientSound = shakerSFXFolder:WaitForChild("AddIngredient")
 local removeIngredientSound = shakerSFXFolder:WaitForChild("Remove")
-local bubblesSound = shakerSFXFolder:WaitForChild("Bubbles")
 
 local energizingSound = shakerSFXFolder:FindFirstChild("Energizing")
 local midEnergizingSound = shakerSFXFolder:FindFirstChild("MidEnergizing")
@@ -88,10 +86,6 @@ local function cleanupBubbleEffects(contentPart)
 
 	for _, child in ipairs(contentPart:GetChildren()) do
 		if child:IsA("ParticleEmitter") then
-			child:Destroy()
-		end
-		if child:IsA("Sound") and child.Name == "Bubbles" then
-			child:Stop()
 			child:Destroy()
 		end
 	end
@@ -322,17 +316,9 @@ end
 ------------------------------------------------------------------------
 
 function ShakerEffects.StartShakeEffects(contentPart, mixedColor)
-	if not contentPart then return nil, nil end
+	if not contentPart then return end
 
-	cleanupAddIngredientSounds(contentPart)
-	cleanupRemoveIngredientSounds(contentPart)
-	cleanupEnergizingSounds(contentPart)
 	cleanupBubbleEffects(contentPart)
-
-	local soundClone = bubblesSound:Clone()
-	soundClone.Parent = contentPart
-	soundClone.Looped = true
-	soundClone:Play()
 
 	for _, effect in ipairs(bubblesVFX:GetChildren()) do
 		if effect:IsA("ParticleEmitter") then
@@ -342,49 +328,24 @@ function ShakerEffects.StartShakeEffects(contentPart, mixedColor)
 			emitterClone.Parent = contentPart
 		end
 	end
-
-	return soundClone, contentPart
 end
 
-function ShakerEffects.StopShakeEffects(soundClone, contentPart)
-	if soundClone and soundClone.Parent then
-		local originalVolume = soundClone.Volume
-		local fadeOutTween = TweenService:Create(soundClone, TweenInfo.new(0.5, Enum.EasingStyle.Linear), {
-			Volume = 0
-		})
+function ShakerEffects.StopShakeEffects(contentPart)
+	if not contentPart then return end
 
-		fadeOutTween.Completed:Connect(function()
-			soundClone:Stop()
-			soundClone:Destroy()
-			fadeOutTween:Destroy()
-		end)
-
-		fadeOutTween:Play()
+	-- Desactivar partículas
+	for _, child in ipairs(contentPart:GetChildren()) do
+		if child:IsA("ParticleEmitter") then
+			child.Enabled = false
+		end
 	end
 
-	if contentPart then
-		local particlesToFade = {}
-		for _, child in ipairs(contentPart:GetChildren()) do
-			if child:IsA("ParticleEmitter") then
-				table.insert(particlesToFade, child)
-			end
+	-- Limpiar después de que se disipen
+	task.delay(1.5, function()
+		if contentPart then
+			cleanupBubbleEffects(contentPart)
 		end
-
-		for _, emitter in ipairs(particlesToFade) do
-			if emitter and emitter.Parent then
-				emitter.Enabled = false
-			end
-		end
-
-		task.delay(1.5, function()
-			if contentPart then
-				cleanupAddIngredientSounds(contentPart)
-				cleanupRemoveIngredientSounds(contentPart)
-				cleanupEnergizingSounds(contentPart)
-				cleanupBubbleEffects(contentPart)
-			end
-		end)
-	end
+	end)
 end
 
 return ShakerEffects
