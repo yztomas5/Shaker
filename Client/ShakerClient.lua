@@ -355,6 +355,14 @@ StartMixingEvent.OnClientEvent:Connect(function(mixedColor)
 
 	local connection = startJellyEffect(parts, mixedColor)
 	ActiveEffects.connection = connection
+
+	-- Desbloquear botones cuando hay mezcla activa
+	if currentTouchPart then
+		ShakerButton.unlock(currentTouchPart)
+	end
+	if currentRemovePart then
+		ShakerButton.unlock(currentRemovePart)
+	end
 end)
 
 StopMixingEvent.OnClientEvent:Connect(function()
@@ -367,6 +375,14 @@ StopMixingEvent.OnClientEvent:Connect(function()
 	end
 
 	stopEffects()
+
+	-- Bloquear botones cuando no hay mezcla activa
+	if currentTouchPart then
+		ShakerButton.lock(currentTouchPart)
+	end
+	if currentRemovePart then
+		ShakerButton.lock(currentRemovePart)
+	end
 end)
 
 CompleteMixingEvent.OnClientEvent:Connect(function(mixedColor)
@@ -378,6 +394,14 @@ CompleteMixingEvent.OnClientEvent:Connect(function(mixedColor)
 	end
 
 	stopEffects()
+
+	-- Bloquear botones cuando no hay mezcla activa
+	if currentTouchPart then
+		ShakerButton.lock(currentTouchPart)
+	end
+	if currentRemovePart then
+		ShakerButton.lock(currentRemovePart)
+	end
 end)
 
 -- Sonido y efecto de burbujas al añadir ingrediente
@@ -631,6 +655,7 @@ local function loadPlotEffects(plotName)
 	if touchPart then
 		currentTouchPart = touchPart
 		ShakerButton.setup(touchPart, currentPlotTrove, onTouchPartClick)
+		ShakerButton.lock(touchPart) -- Bloqueado hasta que haya mezcla activa
 	end
 
 	-- Setup RemovePart
@@ -638,6 +663,7 @@ local function loadPlotEffects(plotName)
 	if removePart then
 		currentRemovePart = removePart
 		ShakerButton.setup(removePart, currentPlotTrove, onRemovePartClick)
+		ShakerButton.lock(removePart) -- Bloqueado hasta que haya mezcla activa
 	end
 end
 
