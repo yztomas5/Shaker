@@ -21,6 +21,7 @@ local Workspace = game:GetService("Workspace")
 
 local Trove = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Data"):WaitForChild("Trove"))
 local ShakerButton = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utils"):WaitForChild("ShakerSystem"):WaitForChild("ShakerButton"))
+local ShakerConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utils"):WaitForChild("ShakerSystem"):WaitForChild("ShakerConfig"))
 
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
@@ -362,6 +363,17 @@ end)
 local function onTouchPartClick()
 	local plotNumber = getCurrentPlotNumber()
 	if not plotNumber then return end
+
+	-- Bloquear el botón durante el cooldown
+	if currentTouchPart then
+		ShakerButton.lock(currentTouchPart)
+
+		task.delay(ShakerConfig.TOUCH_COOLDOWN, function()
+			if currentTouchPart then
+				ShakerButton.unlock(currentTouchPart)
+			end
+		end)
+	end
 
 	TouchPartClickEvent:FireServer(plotNumber)
 end
