@@ -31,6 +31,7 @@ local StopMixingEvent = shakersFolder:WaitForChild("StopMixing")
 local UpdateProgressEvent = shakersFolder:WaitForChild("UpdateProgress")
 local CompleteMixingEvent = shakersFolder:WaitForChild("CompleteMixing")
 local ShakerClickEvent = shakersFolder:WaitForChild("ShakerClick")
+local TouchPartClickEvent = shakersFolder:WaitForChild("TouchPartClick")
 
 -- Config de ingredientes
 local IngredientConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("IngredientConfig"))
@@ -113,10 +114,16 @@ local function isIngredientTool(tool)
 	return typeValue and typeValue:IsA("StringValue") and typeValue.Value == "Ingredient"
 end
 
--- Verificar si una parte pertenece al shaker
-local function isPartOfShaker(part)
+-- Verificar si una parte pertenece al shaker (pero NO es TouchPart)
+local function isPartOfShakerModel(part)
 	local shakerFolder = getShakerFolder()
 	if not shakerFolder then return false end
+
+	-- Verificar si es TouchPart
+	local touchPart = shakerFolder:FindFirstChild("TouchPart")
+	if touchPart and (part == touchPart or part:IsDescendantOf(touchPart)) then
+		return false
+	end
 
 	local current = part
 	while current and current ~= Workspace do
@@ -126,6 +133,15 @@ local function isPartOfShaker(part)
 		current = current.Parent
 	end
 	return false
+end
+
+-- Verificar si una parte es el TouchPart
+local function isTouchPart(part)
+	local shakerFolder = getShakerFolder()
+	if not shakerFolder then return false end
+
+	local touchPart = shakerFolder:FindFirstChild("TouchPart")
+	return touchPart and (part == touchPart or part:IsDescendantOf(touchPart))
 end
 
 ------------------------------------------------------------------------
@@ -366,7 +382,7 @@ RunService.RenderStepped:Connect(function()
 		return
 	end
 
-	if isPartOfShaker(target) then
+	if isPartOfShakerModel(target) then
 		local tool = getEquippedTool()
 		-- Mostrar highlight si tiene ingrediente o energizante en mano
 		if tool and (isIngredientTool(tool) or tool.Name:find("Energizing")) then
@@ -387,8 +403,14 @@ mouse.Button1Down:Connect(function()
 	local plotNumber = getCurrentPlotNumber()
 	if not plotNumber then return end
 
-	if isPartOfShaker(target) then
-		print("[ShakerClient] Click en shaker detectado, enviando al servidor")
+	-- Click en TouchPart = añadir XP
+	if isTouchPart(target) then
+		TouchPartClickEvent:FireServer(plotNumber)
+		return
+	end
+
+	-- Click en modelo del shaker = añadir ingrediente
+	if isPartOfShakerModel(target) then
 		ShakerClickEvent:FireServer(plotNumber)
 	end
 end)

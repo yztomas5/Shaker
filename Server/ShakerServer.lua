@@ -55,6 +55,7 @@ local StopMixingEvent = getOrCreateEvent("StopMixing")
 local UpdateProgressEvent = getOrCreateEvent("UpdateProgress")
 local CompleteMixingEvent = getOrCreateEvent("CompleteMixing")
 local ShakerClickEvent = getOrCreateEvent("ShakerClick")
+local TouchPartClickEvent = getOrCreateEvent("TouchPartClick")
 
 local warningEvent = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Warn"):WaitForChild("Warning")
 
@@ -283,13 +284,6 @@ local function handleShakerClick(player, plotNumber)
 		end
 	end
 
-	-- Cancelar mezcla (click sin herramienta durante mezcla)
-	if isActive and not tool then
-		print("[ShakerServer] Cancelando mezcla")
-		stopMixing(player, true)
-		return
-	end
-
 	-- Añadir ingrediente
 	if tool and Utils.IsIngredientTool(tool) and count < Config.MAX_INGREDIENTS then
 		local toolId = Utils.GetToolId(tool)
@@ -313,10 +307,10 @@ ShakerClickEvent.OnServerEvent:Connect(function(player, plotNumber)
 end)
 
 ------------------------------------------------------------------------
--- TOUCH PART (añadir XP)
+-- TOUCH PART CLICK (añadir XP)
 ------------------------------------------------------------------------
 
-local function onTouchPart(player, plotNumber)
+local function handleTouchPartClick(player, plotNumber)
 	local currentPlotNumber = getPlotNumber(player)
 	if not currentPlotNumber or currentPlotNumber ~= plotNumber then return end
 
@@ -328,8 +322,13 @@ local function onTouchPart(player, plotNumber)
 	local key = player.UserId
 	if not ActiveShakes[key] then return end
 
+	print("[ShakerServer] TouchPart click - añadiendo XP")
 	addXp(player, Config.XP_PER_TOUCH)
 end
+
+TouchPartClickEvent.OnServerEvent:Connect(function(player, plotNumber)
+	handleTouchPartClick(player, plotNumber)
+end)
 
 ------------------------------------------------------------------------
 -- SETUP SHAKERS
@@ -345,23 +344,6 @@ local function setupPlot(plotFolder)
 	end
 
 	print("[ShakerServer] Setup plot:", plotNumber)
-
-	-- TouchPart para XP
-	local touchPart = shakerFolder:FindFirstChild("TouchPart")
-	if touchPart then
-		touchPart.Touched:Connect(function(hit)
-			local character = hit.Parent
-			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-			local touchPlayer = humanoid and Players:GetPlayerFromCharacter(character)
-
-			if touchPlayer then
-				onTouchPart(touchPlayer, plotNumber)
-			end
-		end)
-		print("[ShakerServer] TouchPart configurado para plot:", plotNumber)
-	else
-		print("[ShakerServer] ADVERTENCIA: No se encontró TouchPart en plot:", plotNumber)
-	end
 end
 
 ------------------------------------------------------------------------
