@@ -106,12 +106,6 @@ local function getShakerModel()
 	return nil
 end
 
-local function getPourPart()
-	local shakerFolder = getShakerFolder()
-	if not shakerFolder then return nil end
-	return shakerFolder:FindFirstChild("Pour")
-end
-
 local function getIngredientNames()
 	local playerShakers = player:FindFirstChild("Shakers")
 	if not playerShakers then return {} end
@@ -381,42 +375,8 @@ StopMixingEvent.OnClientEvent:Connect(function()
 end)
 
 CompleteMixingEvent.OnClientEvent:Connect(function(mixedColor)
-	local contentPart = getContentPart()
-	local pourPart = getPourPart()
-
-	-- Detener efectos de burbujas con fade
-	if ActiveEffects.soundClone then
-		ShakerEffects.StopShakeEffects(ActiveEffects.soundClone, contentPart)
-	end
-
-	-- Efecto de vertir con sonido y partículas
-	if pourPart then
-		ShakerEffects.PlayPourEffect(pourPart, mixedColor)
-	end
-
-	-- Detener jelly effect
-	if ActiveEffects.connection then
-		ActiveEffects.connection:Disconnect()
-	end
-	ActiveEffects.active = false
-
-	-- Encoger partes antes de destruirlas
-	if contentPart then
-		for _, child in ipairs(contentPart:GetChildren()) do
-			if child:IsA("BasePart") and child.Name:find("Layer_") then
-				local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In)
-				local tween = TweenService:Create(child, tweenInfo, {
-					Size = Vector3.new(0.01, 0.01, 0.01)
-				})
-				tween.Completed:Connect(function()
-					child:Destroy()
-				end)
-				tween:Play()
-			end
-		end
-	end
-
-	ActiveEffects = {}
+	-- Solo detener efectos sin animaciones adicionales
+	stopEffects()
 end)
 
 -- Sonido y efecto de burbujas al añadir ingrediente
