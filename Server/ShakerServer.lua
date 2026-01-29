@@ -1,19 +1,17 @@
 --[[
 	ShakerServer - Script principal del servidor
-	Maneja toda la lógica de shakers, mezclas, XP
 
-	Estructura esperada en Workspace:
+	Estructura en Workspace:
 	Plots/{PlotNumber}/Shakers/{ShakerNumber}/
 		├─ Ingredients/Content
 		├─ Info/BillboardGui/Content/{Filler, Amount}
-		├─ Add (Part con ProximityPrompt)
+		├─ Add (Part)
 		└─ TouchPart (Part)
 ]]
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 -- Módulos
 local ShakerSystem = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utils"):WaitForChild("ShakerSystem")
@@ -25,75 +23,67 @@ local Data = require(ShakerSystem.ShakerData)
 
 local IngredientConfig = require(ReplicatedStorage.Modules.Config.IngredientConfig)
 
--- Crear RemoteEvents
-local eventsFolder = ReplicatedStorage:FindFirstChild("RemoteEvents") or Instance.new("Folder", ReplicatedStorage)
-eventsFolder.Name = "RemoteEvents"
+print("[ShakerServer] Inicializando...")
 
-local shakersFolder = eventsFolder:FindFirstChild("Shakers") or Instance.new("Folder", eventsFolder)
-shakersFolder.Name = "Shakers"
+-- RemoteEvents
+local eventsFolder = ReplicatedStorage:FindFirstChild("RemoteEvents")
+if not eventsFolder then
+	eventsFolder = Instance.new("Folder")
+	eventsFolder.Name = "RemoteEvents"
+	eventsFolder.Parent = ReplicatedStorage
+end
 
-local function createEvent(name)
-	local event = shakersFolder:FindFirstChild(name) or Instance.new("RemoteEvent", shakersFolder)
-	event.Name = name
+local shakersFolder = eventsFolder:FindFirstChild("Shakers")
+if not shakersFolder then
+	shakersFolder = Instance.new("Folder")
+	shakersFolder.Name = "Shakers"
+	shakersFolder.Parent = eventsFolder
+end
+
+local function getOrCreateEvent(name)
+	local event = shakersFolder:FindFirstChild(name)
+	if not event then
+		event = Instance.new("RemoteEvent")
+		event.Name = name
+		event.Parent = shakersFolder
+	end
 	return event
 end
 
-local Events = {
-	StartMixing = createEvent("StartMixing"),
-	StopMixing = createEvent("StopMixing"),
-	UpdateProgress = createEvent("UpdateProgress"),
-	CompleteMixing = createEvent("CompleteMixing")
-}
+local StartMixingEvent = getOrCreateEvent("StartMixing")
+local StopMixingEvent = getOrCreateEvent("StopMixing")
+local UpdateProgressEvent = getOrCreateEvent("UpdateProgress")
+local CompleteMixingEvent = getOrCreateEvent("CompleteMixing")
 
-local warningEvent = ReplicatedStorage.RemoteEvents.Warn.Warning
+local warningEvent = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Warn"):WaitForChild("Warning")
 
--- Estado
-local ActiveShakes = {} -- [shakeKey] = {player, shakerNumber, currentXp, requiredXp, mixedColor}
-local TouchCooldowns = {} -- [playerId] = lastTouchTime
-local SetupShakers = {} -- [shakerKey] = true
+-- Estado global
+local ActiveShakes = {}
+local TouchCooldowns = {}
 
 local plotsFolder = Workspace:WaitForChild("Plots")
 
 ------------------------------------------------------------------------
--- FUNCIONES DE MEZCLA
+-- BILLBOARD
 ------------------------------------------------------------------------
-
-local function calculateRequiredXp(ingredientFolders)
-	local totalXp = 0
-	for _, folder in ipairs(ingredientFolders) do
-		local info = IngredientConfig.Ingredients[folder.Name]
-		if info and info.Xp then
-			totalXp = totalXp + info.Xp
-		end
-	end
-	return totalXp
-end
-
-local function getIngredientColors(ingredientFolders)
-	local colors = {}
-	for _, folder in ipairs(ingredientFolders) do
-		local info = IngredientConfig.Ingredients[folder.Name]
-		if info and info.Color then
-			table.insert(colors, info.Color)
-		end
-	end
-	return colors
-end
 
 local function updateBillboard(player, shakerNumber, currentXp, requiredXp, enabled)
 	local billboard = Utils.GetBillboard(player, shakerNumber)
-	if not billboard then return end
+	if not billboard then
+		print("[ShakerServer] Billboard no encontrado para shaker", shakerNumber)
+		return
+	end
 
 	billboard.Enabled = enabled
 
-	if enabled then
+	if enabled and requiredXp > 0 then
 		local content = billboard:FindFirstChild("Content")
 		if content then
 			local filler = content:FindFirstChild("Filler")
 			local amount = content:FindFirstChild("Amount")
 
 			if filler then
-				local progress = requiredXp > 0 and math.clamp(currentXp / requiredXp, 0, 1) or 0
+				local progress = math.clamp(currentXp / requiredXp, 0, 1)
 				filler.Size = UDim2.new(progress, 0, 1, 0)
 			end
 
@@ -104,141 +94,161 @@ local function updateBillboard(player, shakerNumber, currentXp, requiredXp, enab
 	end
 end
 
+------------------------------------------------------------------------
+-- MEZCLA
+------------------------------------------------------------------------
+
+local function calculateRequiredXp(ingredients)
+	local total = 0
+	for _, folder in ipairs(ingredients) do
+		local info = IngredientConfig.Ingredients[folder.Name]
+		if info and info.Xp then
+			total = total + info.Xp
+		end
+	end
+	return total
+end
+
+local function getMixedColor(ingredients)
+	local colors = {}
+	for _, folder in ipairs(ingredients) do
+		local info = IngredientConfig.Ingredients[folder.Name]
+		if info and info.Color then
+			table.insert(colors, info.Color)
+		end
+	end
+	return Utils.MixColors(colors)
+end
+
 local function startMixing(player, shakerNumber)
-	local shakeKey = player.UserId .. "_" .. shakerNumber
+	local key = player.UserId .. "_" .. shakerNumber
+	print("[ShakerServer] Iniciando mezcla:", key)
 
 	local ingredients = Inventory.GetIngredients(player, shakerNumber)
-	if #ingredients == 0 then return false end
-
-	local requiredXp = calculateRequiredXp(ingredients)
-	local colors = getIngredientColors(ingredients)
-	local mixedColor = Utils.MixColors(colors)
-
-	-- Si ya está activo, actualizar valores
-	if ActiveShakes[shakeKey] then
-		ActiveShakes[shakeKey].requiredXp = requiredXp
-		ActiveShakes[shakeKey].mixedColor = mixedColor
-		updateBillboard(player, shakerNumber, ActiveShakes[shakeKey].currentXp, requiredXp, true)
-		Events.StartMixing:FireClient(player, shakerNumber, mixedColor)
-		return true
+	if #ingredients == 0 then
+		print("[ShakerServer] No hay ingredientes")
+		return false
 	end
 
-	ActiveShakes[shakeKey] = {
-		player = player,
-		shakerNumber = shakerNumber,
-		currentXp = 0,
-		requiredXp = requiredXp,
-		mixedColor = mixedColor
-	}
+	local requiredXp = calculateRequiredXp(ingredients)
+	local mixedColor = getMixedColor(ingredients)
 
-	updateBillboard(player, shakerNumber, 0, requiredXp, true)
-	Events.StartMixing:FireClient(player, shakerNumber, mixedColor)
+	print("[ShakerServer] XP requerida:", requiredXp, "Ingredientes:", #ingredients)
+
+	if ActiveShakes[key] then
+		ActiveShakes[key].requiredXp = requiredXp
+		ActiveShakes[key].mixedColor = mixedColor
+	else
+		ActiveShakes[key] = {
+			player = player,
+			shakerNumber = shakerNumber,
+			currentXp = 0,
+			requiredXp = requiredXp,
+			mixedColor = mixedColor
+		}
+	end
+
+	updateBillboard(player, shakerNumber, ActiveShakes[key].currentXp, requiredXp, true)
+	StartMixingEvent:FireClient(player, shakerNumber, mixedColor)
 
 	return true
 end
 
 local function stopMixing(player, shakerNumber, returnIngredients)
-	local shakeKey = player.UserId .. "_" .. shakerNumber
+	local key = player.UserId .. "_" .. shakerNumber
+	print("[ShakerServer] Deteniendo mezcla:", key)
 
-	if not ActiveShakes[shakeKey] then return false end
+	if not ActiveShakes[key] then return end
 
 	if returnIngredients then
 		Inventory.ReturnAll(player, shakerNumber)
 	end
 
 	updateBillboard(player, shakerNumber, 0, 0, false)
-	Events.StopMixing:FireClient(player, shakerNumber)
+	StopMixingEvent:FireClient(player, shakerNumber)
 
-	ActiveShakes[shakeKey] = nil
-	return true
+	ActiveShakes[key] = nil
 end
 
 local function completeMixing(player, shakerNumber)
-	local shakeKey = player.UserId .. "_" .. shakerNumber
-	local shakeData = ActiveShakes[shakeKey]
-	if not shakeData then return end
+	local key = player.UserId .. "_" .. shakerNumber
+	local data = ActiveShakes[key]
+	if not data then return end
+
+	print("[ShakerServer] Completando mezcla:", key)
 
 	local ingredients = Inventory.GetIngredients(player, shakerNumber)
-	local mixedColor = shakeData.mixedColor
-
-	-- Crear jugo
 	Juice.Create(player, ingredients)
-
-	-- Limpiar shaker
 	Inventory.Clear(player, shakerNumber)
 
 	updateBillboard(player, shakerNumber, 0, 0, false)
-	Events.CompleteMixing:FireClient(player, shakerNumber, mixedColor)
-
+	CompleteMixingEvent:FireClient(player, shakerNumber, data.mixedColor)
 	warningEvent:FireClient(player, "Your juice is ready!", "Juice")
 
-	ActiveShakes[shakeKey] = nil
+	ActiveShakes[key] = nil
 end
 
 local function addXp(player, shakerNumber, amount)
-	local shakeKey = player.UserId .. "_" .. shakerNumber
-	local shakeData = ActiveShakes[shakeKey]
-	if not shakeData then return false end
+	local key = player.UserId .. "_" .. shakerNumber
+	local data = ActiveShakes[key]
+	if not data then return end
 
-	shakeData.currentXp = shakeData.currentXp + amount
+	data.currentXp = data.currentXp + amount
 
-	updateBillboard(player, shakerNumber, shakeData.currentXp, shakeData.requiredXp, true)
-	Events.UpdateProgress:FireClient(player, shakerNumber, shakeData.currentXp, shakeData.requiredXp)
+	updateBillboard(player, shakerNumber, data.currentXp, data.requiredXp, true)
+	UpdateProgressEvent:FireClient(player, shakerNumber, data.currentXp, data.requiredXp)
 
-	if shakeData.currentXp >= shakeData.requiredXp then
+	if data.currentXp >= data.requiredXp then
 		completeMixing(player, shakerNumber)
 	end
-
-	return true
-end
-
-local function increaseRequiredXp(player, shakerNumber, percentage)
-	local shakeKey = player.UserId .. "_" .. shakerNumber
-	local shakeData = ActiveShakes[shakeKey]
-	if not shakeData then return false end
-
-	local increase = math.floor(shakeData.requiredXp * percentage)
-	shakeData.requiredXp = shakeData.requiredXp + increase
-
-	updateBillboard(player, shakerNumber, shakeData.currentXp, shakeData.requiredXp, true)
-	Events.UpdateProgress:FireClient(player, shakerNumber, shakeData.currentXp, shakeData.requiredXp)
-
-	return true
 end
 
 ------------------------------------------------------------------------
--- INTERACCIONES
+-- INTERACCIÓN ADD
 ------------------------------------------------------------------------
 
-local function handleAddInteraction(player, shakerNumber, plotNumber)
-	if player.CurrentPlot.Value ~= plotNumber then return end
+local function onAddTriggered(player, shakerNumber, plotNumber)
+	local currentPlot = player:FindFirstChild("CurrentPlot")
+	if not currentPlot or currentPlot.Value ~= plotNumber then
+		print("[ShakerServer] Plot incorrecto")
+		return
+	end
 
 	local character = player.Character
 	if not character then return end
 
+	local key = player.UserId .. "_" .. shakerNumber
+	local isActive = ActiveShakes[key] ~= nil
 	local tool = Utils.GetEquippedTool(character)
-	local isActive = ActiveShakes[player.UserId .. "_" .. shakerNumber] ~= nil
 	local count = Inventory.Count(player, shakerNumber)
 
-	-- Si está mezclando y tiene energizante
+	print("[ShakerServer] Add triggered - isActive:", isActive, "tool:", tool and tool.Name, "count:", count)
+
+	-- Energizante durante mezcla
 	if isActive and tool then
-		local energizerPercent = Config.ENERGIZERS[tool.Name]
-		if energizerPercent then
+		local percent = Config.ENERGIZERS[tool.Name]
+		if percent then
 			local toolId = Utils.GetToolId(tool)
-			if toolId then
-				local gearFolder = Inventory.FindGear(player, tool.Name, toolId)
-				if gearFolder then
-					tool:Destroy()
-					gearFolder:Destroy()
-					increaseRequiredXp(player, shakerNumber, energizerPercent)
-					return
-				end
+			local gear = toolId and Inventory.FindGear(player, tool.Name, toolId)
+			if gear then
+				print("[ShakerServer] Añadiendo energizante:", tool.Name)
+				tool:Destroy()
+				gear:Destroy()
+
+				local data = ActiveShakes[key]
+				local increase = math.floor(data.requiredXp * percent)
+				data.requiredXp = data.requiredXp + increase
+
+				updateBillboard(player, shakerNumber, data.currentXp, data.requiredXp, true)
+				UpdateProgressEvent:FireClient(player, shakerNumber, data.currentXp, data.requiredXp)
+				return
 			end
 		end
 	end
 
-	-- Si está mezclando, cancelar
+	-- Cancelar mezcla
 	if isActive then
+		print("[ShakerServer] Cancelando mezcla")
 		stopMixing(player, shakerNumber, true)
 		return
 	end
@@ -246,22 +256,21 @@ local function handleAddInteraction(player, shakerNumber, plotNumber)
 	-- Añadir ingrediente
 	if tool and Utils.IsIngredientTool(tool) and count < Config.MAX_INGREDIENTS then
 		local toolId = Utils.GetToolId(tool)
-		if toolId then
-			local ingredientFolder = Inventory.FindIngredient(player, tool.Name, toolId)
-			if ingredientFolder then
-				tool:Destroy()
-				Inventory.Add(player, shakerNumber, ingredientFolder)
-				startMixing(player, shakerNumber)
-				return
-			end
+		local ingredient = toolId and Inventory.FindIngredient(player, tool.Name, toolId)
+		if ingredient then
+			print("[ShakerServer] Añadiendo ingrediente:", tool.Name)
+			tool:Destroy()
+			Inventory.Add(player, shakerNumber, ingredient)
+			startMixing(player, shakerNumber)
+			return
 		end
 	end
 
 	-- Remover ingrediente
-	if count > 0 and not isActive then
+	if count > 0 then
+		print("[ShakerServer] Removiendo ingrediente")
 		Inventory.RemoveLast(player, shakerNumber)
 
-		-- Si quedan ingredientes, recalcular
 		local newCount = Inventory.Count(player, shakerNumber)
 		if newCount > 0 then
 			startMixing(player, shakerNumber)
@@ -269,124 +278,107 @@ local function handleAddInteraction(player, shakerNumber, plotNumber)
 	end
 end
 
-local function handleTouchPart(player, shakerNumber, plotNumber)
-	if player.CurrentPlot.Value ~= plotNumber then return end
+------------------------------------------------------------------------
+-- TOUCH PART
+------------------------------------------------------------------------
+
+local function onTouchPart(player, shakerNumber, plotNumber)
+	local currentPlot = player:FindFirstChild("CurrentPlot")
+	if not currentPlot or currentPlot.Value ~= plotNumber then return end
 
 	local now = tick()
-	local lastTouch = TouchCooldowns[player.UserId] or 0
-	if now - lastTouch < Config.TOUCH_COOLDOWN then return end
+	local last = TouchCooldowns[player.UserId] or 0
+	if now - last < Config.TOUCH_COOLDOWN then return end
 	TouchCooldowns[player.UserId] = now
 
-	local shakeKey = player.UserId .. "_" .. shakerNumber
-	if not ActiveShakes[shakeKey] then return end
+	local key = player.UserId .. "_" .. shakerNumber
+	if not ActiveShakes[key] then return end
 
 	addXp(player, shakerNumber, Config.XP_PER_TOUCH)
 end
 
 ------------------------------------------------------------------------
--- SETUP DE SHAKERS
+-- SETUP SHAKERS
 ------------------------------------------------------------------------
 
 local function setupShaker(shakerFolder, shakerNumber, plotNumber)
-	local shakerKey = plotNumber .. "_" .. shakerNumber
-	if SetupShakers[shakerKey] then return end
-	SetupShakers[shakerKey] = true
+	print("[ShakerServer] Setup shaker:", plotNumber, shakerNumber)
 
 	local addPart = shakerFolder:FindFirstChild("Add")
 	local touchPart = shakerFolder:FindFirstChild("TouchPart")
 
 	if addPart then
-		-- Crear ProximityPrompt si no existe
-		local prompt = addPart:FindFirstChild("Prompt")
+		-- Buscar o crear prompt
+		local prompt = addPart:FindFirstChildOfClass("ProximityPrompt")
 		if not prompt then
 			prompt = Instance.new("ProximityPrompt")
 			prompt.Name = "Prompt"
 			prompt.ActionText = "Interact"
-			prompt.HoldDuration = 0.3
+			prompt.ObjectText = "Shaker"
+			prompt.HoldDuration = 0.2
 			prompt.MaxActivationDistance = 8
 			prompt.RequiresLineOfSight = false
 			prompt.Parent = addPart
 		end
 
-		prompt.Triggered:Connect(function(player)
-			handleAddInteraction(player, shakerNumber, plotNumber)
+		prompt.Triggered:Connect(function(triggerPlayer)
+			onAddTriggered(triggerPlayer, shakerNumber, plotNumber)
 		end)
 
-		-- Actualizar texto del prompt
-		RunService.Heartbeat:Connect(function()
-			for _, player in ipairs(Players:GetPlayers()) do
-				local currentPlot = player:FindFirstChild("CurrentPlot")
-				if currentPlot and currentPlot.Value == plotNumber then
-					local character = player.Character
-					if character then
-						local hrp = character:FindFirstChild("HumanoidRootPart")
-						if hrp and (hrp.Position - addPart.Position).Magnitude <= 10 then
-							local tool = Utils.GetEquippedTool(character)
-							local isActive = ActiveShakes[player.UserId .. "_" .. shakerNumber] ~= nil
-							local count = Inventory.Count(player, shakerNumber)
-
-							if isActive and tool and Config.ENERGIZERS[tool.Name] then
-								prompt.ActionText = "Add " .. tool.Name
-								prompt.Enabled = true
-							elseif isActive then
-								prompt.ActionText = "Cancel"
-								prompt.Enabled = true
-							elseif tool and Utils.IsIngredientTool(tool) and count < Config.MAX_INGREDIENTS then
-								prompt.ActionText = "Add (" .. count .. "/" .. Config.MAX_INGREDIENTS .. ")"
-								prompt.Enabled = true
-							elseif count > 0 then
-								prompt.ActionText = "Remove (" .. count .. "/" .. Config.MAX_INGREDIENTS .. ")"
-								prompt.Enabled = true
-							else
-								prompt.Enabled = false
-							end
-						end
-					end
-				end
-			end
-		end)
+		print("[ShakerServer] ProximityPrompt configurado en Add")
+	else
+		print("[ShakerServer] ADVERTENCIA: No se encontró parte Add")
 	end
 
 	if touchPart then
 		touchPart.Touched:Connect(function(hit)
 			local character = hit.Parent
-			if not character then return end
-			local humanoid = character:FindFirstChildOfClass("Humanoid")
-			if not humanoid then return end
-			local player = Players:GetPlayerFromCharacter(character)
-			if not player then return end
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			local touchPlayer = humanoid and Players:GetPlayerFromCharacter(character)
 
-			handleTouchPart(player, shakerNumber, plotNumber)
+			if touchPlayer then
+				onTouchPart(touchPlayer, shakerNumber, plotNumber)
+			end
 		end)
+		print("[ShakerServer] TouchPart configurado")
+	else
+		print("[ShakerServer] ADVERTENCIA: No se encontró TouchPart")
 	end
 end
 
 local function setupPlot(plotFolder)
 	local plotNumber = plotFolder.Name
 	local shakersRoot = plotFolder:FindFirstChild("Shakers")
-	if not shakersRoot then return end
 
-	for _, shakerFolder in ipairs(shakersRoot:GetChildren()) do
-		if shakerFolder:IsA("Folder") then
-			local shakerNumber = tonumber(shakerFolder.Name)
-			if shakerNumber then
-				setupShaker(shakerFolder, shakerNumber, plotNumber)
+	if not shakersRoot then
+		print("[ShakerServer] No se encontró Shakers en plot:", plotNumber)
+		return
+	end
+
+	print("[ShakerServer] Setup plot:", plotNumber)
+
+	for _, child in ipairs(shakersRoot:GetChildren()) do
+		if child:IsA("Folder") then
+			local num = tonumber(child.Name)
+			if num then
+				setupShaker(child, num, plotNumber)
 			end
 		end
 	end
 
-	shakersRoot.ChildAdded:Connect(function(shakerFolder)
-		if shakerFolder:IsA("Folder") then
-			local shakerNumber = tonumber(shakerFolder.Name)
-			if shakerNumber then
-				setupShaker(shakerFolder, shakerNumber, plotNumber)
+	shakersRoot.ChildAdded:Connect(function(child)
+		if child:IsA("Folder") then
+			local num = tonumber(child.Name)
+			if num then
+				task.wait(0.1)
+				setupShaker(child, num, plotNumber)
 			end
 		end
 	end)
 end
 
 ------------------------------------------------------------------------
--- SINCRONIZACIÓN DE FOLDERS DEL JUGADOR
+-- SINCRONIZAR FOLDERS DEL JUGADOR
 ------------------------------------------------------------------------
 
 local function syncPlayerShakers(player)
@@ -400,85 +392,94 @@ local function syncPlayerShakers(player)
 	local shakersRoot = plotFolder:FindFirstChild("Shakers")
 	if not shakersRoot then return end
 
-	-- Sincronizar folders
+	-- Obtener shakers deseados
 	local desired = {}
-	for _, shakerFolder in ipairs(shakersRoot:GetChildren()) do
-		if shakerFolder:IsA("Folder") then
-			desired[shakerFolder.Name] = true
+	for _, child in ipairs(shakersRoot:GetChildren()) do
+		if child:IsA("Folder") then
+			desired[child.Name] = true
 		end
 	end
 
+	-- Eliminar los que sobran
 	for _, folder in ipairs(playerShakers:GetChildren()) do
 		if folder:IsA("Folder") and not desired[folder.Name] then
 			folder:Destroy()
 		end
 	end
 
+	-- Crear los que faltan
 	for name in pairs(desired) do
 		if not playerShakers:FindFirstChild(name) then
-			local newFolder = Instance.new("Folder")
-			newFolder.Name = name
-			newFolder.Parent = playerShakers
+			local f = Instance.new("Folder")
+			f.Name = name
+			f.Parent = playerShakers
 		end
 	end
+
+	print("[ShakerServer] Shakers sincronizados para:", player.Name)
 end
 
 ------------------------------------------------------------------------
--- EVENTOS DE JUGADORES
+-- JUGADORES
 ------------------------------------------------------------------------
 
 local function onPlayerAdded(player)
+	print("[ShakerServer] Jugador conectado:", player.Name)
+
 	Data.EnsureShakersFolder(player)
 	TouchCooldowns[player.UserId] = 0
 
-	-- Esperar CurrentPlot
-	local currentPlot = player:WaitForChild("CurrentPlot", 10)
-	if currentPlot then
-		currentPlot.Changed:Connect(function()
-			syncPlayerShakers(player)
-		end)
+	local currentPlot = player:WaitForChild("CurrentPlot", 15)
+	if not currentPlot then
+		print("[ShakerServer] CurrentPlot no encontrado para:", player.Name)
+		return
+	end
 
-		task.wait(1)
+	currentPlot.Changed:Connect(function()
 		syncPlayerShakers(player)
+	end)
 
-		-- Cargar datos guardados
-		local savedShakes = Data.Load(player)
-		if savedShakes then
-			for shakerNumber, shakeData in pairs(savedShakes) do
-				local num = tonumber(shakerNumber)
-				if num and shakeData.RequiredXp > 0 and shakeData.CurrentXp < shakeData.RequiredXp then
-					task.spawn(function()
-						task.wait(0.5)
-						local ingredients = Inventory.GetIngredients(player, num)
-						if #ingredients > 0 then
-							local colors = getIngredientColors(ingredients)
-							local mixedColor = Utils.MixColors(colors)
+	task.wait(1)
+	syncPlayerShakers(player)
 
-							ActiveShakes[player.UserId .. "_" .. num] = {
-								player = player,
-								shakerNumber = num,
-								currentXp = shakeData.CurrentXp,
-								requiredXp = shakeData.RequiredXp,
-								mixedColor = mixedColor
-							}
-
-							updateBillboard(player, num, shakeData.CurrentXp, shakeData.RequiredXp, true)
-							Events.StartMixing:FireClient(player, num, mixedColor)
-						end
-					end)
-				end
+	-- Restaurar mezclas guardadas
+	local saved = Data.Load(player)
+	if saved then
+		for shakerNum, shakeData in pairs(saved) do
+			local num = tonumber(shakerNum)
+			if num and shakeData.RequiredXp > 0 and shakeData.CurrentXp < shakeData.RequiredXp then
+				task.spawn(function()
+					task.wait(1)
+					local ingredients = Inventory.GetIngredients(player, num)
+					if #ingredients > 0 then
+						local key = player.UserId .. "_" .. num
+						ActiveShakes[key] = {
+							player = player,
+							shakerNumber = num,
+							currentXp = shakeData.CurrentXp,
+							requiredXp = shakeData.RequiredXp,
+							mixedColor = getMixedColor(ingredients)
+						}
+						updateBillboard(player, num, shakeData.CurrentXp, shakeData.RequiredXp, true)
+						StartMixingEvent:FireClient(player, num, ActiveShakes[key].mixedColor)
+						print("[ShakerServer] Mezcla restaurada:", key)
+					end
+				end)
 			end
 		end
 	end
 end
 
 local function onPlayerRemoving(player)
+	print("[ShakerServer] Jugador desconectado:", player.Name)
+
 	Data.Save(player, ActiveShakes)
 	TouchCooldowns[player.UserId] = nil
 
 	-- Limpiar mezclas activas
+	local prefix = tostring(player.UserId) .. "_"
 	for key in pairs(ActiveShakes) do
-		if key:find(tostring(player.UserId)) then
+		if key:sub(1, #prefix) == prefix then
 			ActiveShakes[key] = nil
 		end
 	end
@@ -505,27 +506,24 @@ Players.PlayerAdded:Connect(onPlayerAdded)
 Players.PlayerRemoving:Connect(onPlayerRemoving)
 
 for _, player in ipairs(Players:GetPlayers()) do
-	task.spawn(function()
-		onPlayerAdded(player)
-	end)
+	task.spawn(onPlayerAdded, player)
 end
 
--- Auto-guardado periódico
+-- Auto-guardado
 task.spawn(function()
 	while true do
 		task.wait(120)
 		for _, player in ipairs(Players:GetPlayers()) do
-			task.spawn(function()
-				Data.Save(player, ActiveShakes)
-			end)
+			Data.Save(player, ActiveShakes)
 		end
 	end
 end)
 
--- Guardar al cerrar
 game:BindToClose(function()
 	for _, player in ipairs(Players:GetPlayers()) do
 		Data.Save(player, ActiveShakes)
 	end
-	task.wait(3)
+	task.wait(2)
 end)
+
+print("[ShakerServer] Inicialización completa")
