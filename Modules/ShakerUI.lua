@@ -13,24 +13,39 @@ local IngredientConfig = require(ReplicatedStorage.Modules.Config.IngredientConf
 local ShakerUI = {}
 
 local effectsTrove = nil
-local highlightTrove = nil
+local currentHighlight = nil
+local currentHighlightModel = nil
 
 ------------------------------------------------------------------------
 -- HIGHLIGHT
 ------------------------------------------------------------------------
 
 function ShakerUI.clearHighlight()
-	if highlightTrove then
-		highlightTrove:Destroy()
-		highlightTrove = nil
+	-- Destruir highlight directo si existe
+	if currentHighlight then
+		currentHighlight:Destroy()
+		currentHighlight = nil
+	end
+
+	-- También buscar en el modelo por si acaso
+	if currentHighlightModel then
+		local existing = currentHighlightModel:FindFirstChild("ShakerHighlight")
+		if existing then
+			existing:Destroy()
+		end
+		currentHighlightModel = nil
 	end
 end
 
 function ShakerUI.applyHighlight(model)
 	if not model then return end
 
+	-- Si ya hay highlight en este modelo, no hacer nada
+	if currentHighlight and currentHighlightModel == model then
+		return
+	end
+
 	ShakerUI.clearHighlight()
-	highlightTrove = Trove.new()
 
 	local highlight = Instance.new("Highlight")
 	highlight.Name = "ShakerHighlight"
@@ -41,7 +56,8 @@ function ShakerUI.applyHighlight(model)
 	highlight.Adornee = model
 	highlight.Parent = model
 
-	highlightTrove:Add(highlight)
+	currentHighlight = highlight
+	currentHighlightModel = model
 end
 
 ------------------------------------------------------------------------
