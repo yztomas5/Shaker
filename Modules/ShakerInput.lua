@@ -136,27 +136,20 @@ function ShakerInput.setup(inputTrove, callbacks)
 	onHoverCallback = callbacks.onHover
 	onHoverLeaveCallback = callbacks.onHoverLeave
 
-	-- Hover detection
+	-- Hover detection - simple hover independiente de estados
+	local isHovering = false
+
 	trove:Connect(RunService.RenderStepped, function()
 		local target = mouse.Target
-		if not target then
-			if onHoverLeaveCallback then
-				onHoverLeaveCallback()
-			end
-			return
-		end
+		local shouldHover = target and isPartOfShakerModel(target)
 
-		if isPartOfShakerModel(target) then
-			if ShakerInput.hasValidTool() then
-				if onHoverCallback then
-					onHoverCallback()
-				end
-			else
-				if onHoverLeaveCallback then
-					onHoverLeaveCallback()
-				end
+		if shouldHover and not isHovering then
+			isHovering = true
+			if onHoverCallback then
+				onHoverCallback()
 			end
-		else
+		elseif not shouldHover and isHovering then
+			isHovering = false
 			if onHoverLeaveCallback then
 				onHoverLeaveCallback()
 			end
