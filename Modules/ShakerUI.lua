@@ -1,43 +1,36 @@
 --[[
 	ShakerUI - Efectos visuales del shaker (juice parts, jelly, highlights)
+	Usa Trove para limpieza automática
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
+local Trove = require(ReplicatedStorage.Modules.Data.Trove)
 local IngredientConfig = require(ReplicatedStorage.Modules.Config.IngredientConfig)
 
 local ShakerUI = {}
 
-local activeEffects = {
-	active = false,
-	parts = {},
-	mixedColor = nil,
-	connection = nil
-}
-
-local currentHighlight = nil
-local currentHoveredModel = nil
+local effectsTrove = nil
+local highlightTrove = nil
 
 ------------------------------------------------------------------------
 -- HIGHLIGHT
 ------------------------------------------------------------------------
 
 function ShakerUI.clearHighlight()
-	if currentHighlight then
-		currentHighlight:Destroy()
-		currentHighlight = nil
+	if highlightTrove then
+		highlightTrove:Destroy()
+		highlightTrove = nil
 	end
-	currentHoveredModel = nil
 end
 
 function ShakerUI.applyHighlight(model)
 	if not model then return end
-	if currentHoveredModel == model then return end
 
 	ShakerUI.clearHighlight()
-	currentHoveredModel = model
+	highlightTrove = Trove.new()
 
 	local highlight = Instance.new("Highlight")
 	highlight.Name = "ShakerHighlight"
@@ -48,7 +41,7 @@ function ShakerUI.applyHighlight(model)
 	highlight.Adornee = model
 	highlight.Parent = model
 
-	currentHighlight = highlight
+	highlightTrove:Add(highlight)
 end
 
 ------------------------------------------------------------------------
@@ -64,7 +57,7 @@ local function clearContent(contentPart)
 	end
 end
 
-function ShakerUI.createJuiceParts(contentPart, ingredientNames, mixedColor)
+local function createJuiceParts(contentPart, ingredientNames, mixedColor, trove)
 	clearContent(contentPart)
 
 	local numIngredients = #ingredientNames
@@ -101,6 +94,7 @@ function ShakerUI.createJuiceParts(contentPart, ingredientNames, mixedColor)
 			part.CFrame = contentCFrame * CFrame.new(0, offsetY, 0)
 
 			part.Parent = contentPart
+			trove:Add(part)
 
 			local tween = TweenService:Create(part, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 				Size = finalSize
@@ -118,12 +112,17 @@ end
 -- JELLY EFFECT
 ------------------------------------------------------------------------
 
-local function startJellyEffect(parts, mixedColor)
-	if #parts == 0 then return nil end
+local function startJellyEffect(parts, mixedColor, trove)
+	if #parts == 0 then return end
+
+	local active = true
+	trove:Add(function()
+		active = false
+	end)
 
 	for _, part in ipairs(parts) do
 		task.spawn(function()
-			while activeEffects.active and part.Parent do
+			while active and part.Parent do
 				local variation = -0.25 + math.random() * 0.3
 				local newColor
 				if variation > 0 then
@@ -143,7 +142,7 @@ local function startJellyEffect(parts, mixedColor)
 		end)
 	end
 
-	local connection = RunService.Heartbeat:Connect(function()
+	trove:Connect(RunService.Heartbeat, function()
 		for _, part in ipairs(parts) do
 			if part.Parent and math.random() < 0.03 then
 				local baseSizeStr = part:GetAttribute("BaseSize")
@@ -171,8 +170,6 @@ local function startJellyEffect(parts, mixedColor)
 			end
 		end
 	end)
-
-	return connection
 end
 
 ------------------------------------------------------------------------
@@ -180,61 +177,34 @@ end
 ------------------------------------------------------------------------
 
 function ShakerUI.startEffects(contentPart, ingredientNames, mixedColor)
-	ShakerUI.stopEffects(contentPart)
+	ShakerUI.stopEffects()
 
-	local parts = ShakerUI.createJuiceParts(contentPart, ingredientNames, mixedColor)
+	effectsTrove = Trove.new()
 
-	activeEffects = {
-		active = true,
-		parts = parts,
-		mixedColor = mixedColor
-	}
+	local parts = createJuiceParts(contentPart, ingredientNames, mixedColor, effectsTrove)
+	startJellyEffect(parts, mixedColor, effectsTrove)
 
-	local connection = startJellyEffect(parts, mixedColor)
-	activeEffects.connection = connection
+	-- Guardar referencia a las partes para flashParts
+	effectsTrove._parts = parts
+	effectsTrove._mixedColor = mixedColor
 
 	return parts
 end
 
-function ShakerUI.stopEffects(contentPart)
-	if not activeEffects.active then return end
-
-	if activeEffects.connection then
-		activeEffects.connection:Disconnect()
+function ShakerUI.stopEffects()
+	if effectsTrove then
+		effectsTrove:Destroy()
+		effectsTrove = nil
 	end
-
-	if contentPart then
-		for _, part in ipairs(activeEffects.parts or {}) do
-			if part.Parent then
-				local tween = TweenService:Create(part, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-					Size = part.Size * 0.01
-				})
-				tween.Completed:Connect(function()
-					part:Destroy()
-				end)
-				tween:Play()
-			end
-		end
-	end
-
-	activeEffects = {
-		active = false,
-		parts = {},
-		mixedColor = nil,
-		connection = nil
-	}
 end
 
 function ShakerUI.isActive()
-	return activeEffects.active
+	return effectsTrove ~= nil
 end
 
-function ShakerUI.getParts()
-	return activeEffects.parts
-end
-
-function ShakerUI.getMixedColor()
-	return activeEffects.mixedColor
+function ShakerUI.cleanup()
+	ShakerUI.stopEffects()
+	ShakerUI.clearHighlight()
 end
 
 ------------------------------------------------------------------------
@@ -242,9 +212,9 @@ end
 ------------------------------------------------------------------------
 
 function ShakerUI.flashParts(flashColor)
-	if not activeEffects.parts then return end
+	if not effectsTrove or not effectsTrove._parts then return end
 
-	for _, part in ipairs(activeEffects.parts) do
+	for _, part in ipairs(effectsTrove._parts) do
 		if part.Parent then
 			local originalColor = part.Color
 			local originalSize = part.Size

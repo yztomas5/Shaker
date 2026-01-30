@@ -1,6 +1,6 @@
 --[[
-	ShakerEffects - Efectos visuales y de sonido para el sistema de Shakers
-	Basado en el sistema original con sonidos y VFX de Assets
+	ShakerEffects - Efectos de sonido y partículas VFX
+	Usa Trove para limpieza automática
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -28,6 +28,9 @@ local energizingVFX = shakerVFXFolder:FindFirstChild("Energizing")
 local midEnergizingVFX = shakerVFXFolder:FindFirstChild("MidEnergizing")
 local bigEnergizingVFX = shakerVFXFolder:FindFirstChild("BigEnergizing")
 
+-- Trove para efectos activos
+local shakeEffectsTrove = nil
+
 ------------------------------------------------------------------------
 -- UTILIDADES DE COLOR
 ------------------------------------------------------------------------
@@ -48,57 +51,11 @@ function ShakerEffects.MixColors(colors)
 end
 
 ------------------------------------------------------------------------
--- LIMPIEZA DE SONIDOS
-------------------------------------------------------------------------
-
-local function cleanupSounds(contentPart, soundName)
-	if not contentPart then return end
-
-	for _, child in ipairs(contentPart:GetChildren()) do
-		if child:IsA("Sound") and child.Name == soundName then
-			child:Stop()
-			child:Destroy()
-		end
-	end
-end
-
-local function cleanupAddIngredientSounds(contentPart)
-	cleanupSounds(contentPart, "AddIngredient")
-end
-
-local function cleanupRemoveIngredientSounds(contentPart)
-	cleanupSounds(contentPart, "Remove")
-end
-
-local function cleanupEnergizingSounds(contentPart)
-	if not contentPart then return end
-
-	for _, child in ipairs(contentPart:GetChildren()) do
-		if child:IsA("Sound") and (child.Name == "Energizing" or child.Name == "MidEnergizing" or child.Name == "BigEnergizing") then
-			child:Stop()
-			child:Destroy()
-		end
-	end
-end
-
-local function cleanupBubbleEffects(contentPart)
-	if not contentPart then return end
-
-	for _, child in ipairs(contentPart:GetChildren()) do
-		if child:IsA("ParticleEmitter") then
-			child:Destroy()
-		end
-	end
-end
-
-------------------------------------------------------------------------
 -- SONIDOS DE INGREDIENTES
 ------------------------------------------------------------------------
 
 function ShakerEffects.PlayAddIngredientSound(contentPart)
 	if not contentPart or not contentPart:IsA("BasePart") then return end
-
-	cleanupAddIngredientSounds(contentPart)
 
 	local trove = Trove.new()
 	local s = addIngredientSound:Clone()
@@ -113,8 +70,6 @@ end
 
 function ShakerEffects.PlayRemoveIngredientSound(contentPart)
 	if not contentPart or not contentPart:IsA("BasePart") then return end
-
-	cleanupRemoveIngredientSounds(contentPart)
 
 	local trove = Trove.new()
 	local s = removeIngredientSound:Clone()
@@ -135,7 +90,7 @@ function ShakerEffects.PlayAddIngredientBubbles(contentPart, ingredientColor)
 	if not contentPart or not contentPart:IsA("BasePart") then return end
 	if not ingredientColor then return end
 
-	local particleClones = {}
+	local trove = Trove.new()
 
 	for _, effect in ipairs(bubblesVFX:GetChildren()) do
 		if effect:IsA("ParticleEmitter") then
@@ -143,24 +98,12 @@ function ShakerEffects.PlayAddIngredientBubbles(contentPart, ingredientColor)
 			emitterClone.Color = ColorSequence.new(ingredientColor)
 			emitterClone.Enabled = true
 			emitterClone.Parent = contentPart
-			table.insert(particleClones, emitterClone)
+			trove:Add(emitterClone)
 		end
 	end
 
 	task.delay(0.5, function()
-		for _, emitter in ipairs(particleClones) do
-			if emitter and emitter.Parent then
-				emitter.Enabled = false
-			end
-		end
-
-		task.delay(2, function()
-			for _, emitter in ipairs(particleClones) do
-				if emitter and emitter.Parent then
-					emitter:Destroy()
-				end
-			end
-		end)
+		trove:Destroy()
 	end)
 end
 
@@ -209,25 +152,13 @@ end
 function ShakerEffects.PlayEnergizingSound(contentPart)
 	if not contentPart or not contentPart:IsA("BasePart") then return end
 
-	cleanupEnergizingSounds(contentPart)
-
 	local trove = Trove.new()
 
+	local soundToUse = energizingSound or addIngredientSound
+	local s = soundToUse:Clone()
 	if not energizingSound then
-		cleanupAddIngredientSounds(contentPart)
-
-		local s = addIngredientSound:Clone()
 		s.PlaybackSpeed = 1.5
-		s.Parent = contentPart
-		trove:Add(s)
-		s:Play()
-		trove:Connect(s.Ended, function()
-			trove:Destroy()
-		end)
-		return
 	end
-
-	local s = energizingSound:Clone()
 	s.Parent = contentPart
 	trove:Add(s)
 	s:Play()
@@ -244,25 +175,13 @@ end
 function ShakerEffects.PlayMidEnergizingSound(contentPart)
 	if not contentPart or not contentPart:IsA("BasePart") then return end
 
-	cleanupEnergizingSounds(contentPart)
-
 	local trove = Trove.new()
 
+	local soundToUse = midEnergizingSound or addIngredientSound
+	local s = soundToUse:Clone()
 	if not midEnergizingSound then
-		cleanupAddIngredientSounds(contentPart)
-
-		local s = addIngredientSound:Clone()
 		s.PlaybackSpeed = 1.75
-		s.Parent = contentPart
-		trove:Add(s)
-		s:Play()
-		trove:Connect(s.Ended, function()
-			trove:Destroy()
-		end)
-		return
 	end
-
-	local s = midEnergizingSound:Clone()
 	s.Parent = contentPart
 	trove:Add(s)
 	s:Play()
@@ -279,25 +198,13 @@ end
 function ShakerEffects.PlayBigEnergizingSound(contentPart)
 	if not contentPart or not contentPart:IsA("BasePart") then return end
 
-	cleanupEnergizingSounds(contentPart)
-
 	local trove = Trove.new()
 
+	local soundToUse = bigEnergizingSound or addIngredientSound
+	local s = soundToUse:Clone()
 	if not bigEnergizingSound then
-		cleanupAddIngredientSounds(contentPart)
-
-		local s = addIngredientSound:Clone()
 		s.PlaybackSpeed = 2.0
-		s.Parent = contentPart
-		trove:Add(s)
-		s:Play()
-		trove:Connect(s.Ended, function()
-			trove:Destroy()
-		end)
-		return
 	end
-
-	local s = bigEnergizingSound:Clone()
 	s.Parent = contentPart
 	trove:Add(s)
 	s:Play()
@@ -318,7 +225,9 @@ end
 function ShakerEffects.StartShakeEffects(contentPart, mixedColor)
 	if not contentPart then return end
 
-	cleanupBubbleEffects(contentPart)
+	ShakerEffects.StopShakeEffects()
+
+	shakeEffectsTrove = Trove.new()
 
 	for _, effect in ipairs(bubblesVFX:GetChildren()) do
 		if effect:IsA("ParticleEmitter") then
@@ -326,26 +235,20 @@ function ShakerEffects.StartShakeEffects(contentPart, mixedColor)
 			emitterClone.Color = ColorSequence.new(mixedColor)
 			emitterClone.Enabled = true
 			emitterClone.Parent = contentPart
+			shakeEffectsTrove:Add(emitterClone)
 		end
 	end
 end
 
-function ShakerEffects.StopShakeEffects(contentPart)
-	if not contentPart then return end
-
-	-- Desactivar partículas
-	for _, child in ipairs(contentPart:GetChildren()) do
-		if child:IsA("ParticleEmitter") then
-			child.Enabled = false
-		end
+function ShakerEffects.StopShakeEffects()
+	if shakeEffectsTrove then
+		shakeEffectsTrove:Destroy()
+		shakeEffectsTrove = nil
 	end
+end
 
-	-- Limpiar después de que se disipen
-	task.delay(1.5, function()
-		if contentPart then
-			cleanupBubbleEffects(contentPart)
-		end
-	end)
+function ShakerEffects.cleanup()
+	ShakerEffects.StopShakeEffects()
 end
 
 return ShakerEffects

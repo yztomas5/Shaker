@@ -61,6 +61,66 @@ local function getBillboard(player)
 end
 
 ------------------------------------------------------------------------
+-- LIMPIEZA DE PLOT
+------------------------------------------------------------------------
+
+local function cleanupPlotVisuals(plotNumber)
+	if not plotNumber then return end
+
+	local plotFolder = plotsFolder:FindFirstChild(plotNumber)
+	if not plotFolder then return end
+
+	local shakerFolder = plotFolder:FindFirstChild("Shakers")
+	if not shakerFolder then return end
+
+	-- Desactivar billboard
+	local info = shakerFolder:FindFirstChild("Info")
+	if info then
+		local billboard = info:FindFirstChild("BillboardGui")
+		if billboard then
+			billboard.Enabled = false
+		end
+	end
+
+	-- Limpiar contenido visual de ingredientes
+	local ingredientsFolder = shakerFolder:FindFirstChild("Ingredients")
+	if ingredientsFolder then
+		local contentPart = ingredientsFolder:FindFirstChild("Content")
+		if contentPart then
+			for _, child in ipairs(contentPart:GetChildren()) do
+				-- Limpiar partes de juice (Layer_)
+				if child:IsA("BasePart") and child.Name:find("Layer_") then
+					child:Destroy()
+				end
+				-- Limpiar partículas
+				if child:IsA("ParticleEmitter") then
+					child:Destroy()
+				end
+				-- Limpiar sonidos
+				if child:IsA("Sound") then
+					child:Stop()
+					child:Destroy()
+				end
+			end
+		end
+	end
+
+	-- Limpiar modelo también por si acaso
+	local modelFolder = shakerFolder:FindFirstChild("Model")
+	if modelFolder then
+		for _, model in ipairs(modelFolder:GetChildren()) do
+			if model:IsA("Model") then
+				-- Limpiar highlights
+				local highlight = model:FindFirstChild("ShakerHighlight")
+				if highlight then
+					highlight:Destroy()
+				end
+			end
+		end
+	end
+end
+
+------------------------------------------------------------------------
 -- BILLBOARD
 ------------------------------------------------------------------------
 
@@ -317,40 +377,16 @@ function ShakerServerController.onPlayerAdded(player)
 end
 
 function ShakerServerController.onPlayerRemoving(player)
+	-- Guardar datos primero
 	Data.Save(player, ActiveShakes)
 
+	-- Obtener la plot del jugador antes de limpiar
 	local plotNumber = getPlotNumber(player)
-	if plotNumber then
-		local plotFolder = plotsFolder:FindFirstChild(plotNumber)
-		if plotFolder then
-			local shakerFolder = plotFolder:FindFirstChild("Shakers")
-			if shakerFolder then
-				local info = shakerFolder:FindFirstChild("Info")
-				if info then
-					local billboard = info:FindFirstChild("BillboardGui")
-					if billboard then
-						billboard.Enabled = false
-					end
-				end
 
-				local ingredientsFolder = shakerFolder:FindFirstChild("Ingredients")
-				if ingredientsFolder then
-					local contentPart = ingredientsFolder:FindFirstChild("Content")
-					if contentPart then
-						for _, child in ipairs(contentPart:GetChildren()) do
-							if child:IsA("BasePart") and child.Name:find("Layer_") then
-								child:Destroy()
-							end
-							if child:IsA("ParticleEmitter") then
-								child:Destroy()
-							end
-						end
-					end
-				end
-			end
-		end
-	end
+	-- Limpiar todos los visuales de la plot
+	cleanupPlotVisuals(plotNumber)
 
+	-- Limpiar estado
 	TouchCooldowns[player.UserId] = nil
 	ClickCooldowns[player.UserId] = nil
 	ActiveShakes[player.UserId] = nil

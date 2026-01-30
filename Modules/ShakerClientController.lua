@@ -1,6 +1,7 @@
 --[[
 	ShakerClientController - Controlador principal del cliente
 	Coordina todos los módulos del cliente
+	Usa Trove para limpieza automática
 ]]
 
 local Players = game:GetService("Players")
@@ -35,11 +36,26 @@ local IngredientAddedEvent = shakersFolder:WaitForChild("IngredientAdded")
 local IngredientRemovedEvent = shakersFolder:WaitForChild("IngredientRemoved")
 local EnergizingAddedEvent = shakersFolder:WaitForChild("EnergizingAdded")
 
--- State
-local mainTrove = Trove.new()
+-- Troves
+local mainTrove = nil
 local plotTrove = nil
+
+-- State
 local currentTouchPart = nil
 local currentRemovePart = nil
+
+------------------------------------------------------------------------
+-- CLEANUP
+------------------------------------------------------------------------
+
+local function cleanupAll()
+	ShakerUI.cleanup()
+	ShakerEffects.cleanup()
+	ShakerPopup.forceClose()
+
+	currentTouchPart = nil
+	currentRemovePart = nil
+end
 
 ------------------------------------------------------------------------
 -- BUTTON HANDLERS
@@ -121,19 +137,16 @@ local function setupEvents()
 	mainTrove:Connect(StopMixingEvent.OnClientEvent, function()
 		local contentPart = ShakerInput.getContentPart()
 		if contentPart then
-			ShakerEffects.StopShakeEffects(contentPart)
+			ShakerEffects.StopShakeEffects()
 			ShakerEffects.PlayRemoveIngredientSound(contentPart)
 		end
-		ShakerUI.stopEffects(contentPart)
+		ShakerUI.stopEffects()
 		lockButtons()
 	end)
 
 	mainTrove:Connect(CompleteMixingEvent.OnClientEvent, function(mixedColor)
-		local contentPart = ShakerInput.getContentPart()
-		if contentPart then
-			ShakerEffects.StopShakeEffects(contentPart)
-		end
-		ShakerUI.stopEffects(contentPart)
+		ShakerEffects.StopShakeEffects()
+		ShakerUI.stopEffects()
 		lockButtons()
 	end)
 
@@ -177,15 +190,13 @@ end
 ------------------------------------------------------------------------
 
 local function loadPlot(plotName)
+	-- Limpiar plot anterior
 	if plotTrove then
 		plotTrove:Destroy()
 		plotTrove = nil
 	end
 
-	currentTouchPart = nil
-	currentRemovePart = nil
-	ShakerUI.clearHighlight()
-	ShakerPopup.forceClose()
+	cleanupAll()
 
 	if not plotName or plotName == "" then
 		return
@@ -230,6 +241,11 @@ local function loadPlot(plotName)
 			ShakerUI.clearHighlight()
 		end
 	})
+
+	-- Cleanup cuando se destruye el plot trove
+	plotTrove:Add(function()
+		cleanupAll()
+	end)
 end
 
 local function setupPlotWatcher()
@@ -252,13 +268,25 @@ end
 ------------------------------------------------------------------------
 
 function ShakerClientController.init()
+	mainTrove = Trove.new()
+
 	ShakerPopup.init()
 	setupEvents()
 	setupPlotWatcher()
 end
 
 function ShakerClientController.destroy()
-	mainTrove:Destroy()
+	if plotTrove then
+		plotTrove:Destroy()
+		plotTrove = nil
+	end
+
+	if mainTrove then
+		mainTrove:Destroy()
+		mainTrove = nil
+	end
+
+	cleanupAll()
 end
 
 return ShakerClientController
