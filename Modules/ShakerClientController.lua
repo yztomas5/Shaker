@@ -35,7 +35,6 @@ local CancelMixingEvent = shakersFolder:WaitForChild("CancelMixing")
 local IngredientAddedEvent = shakersFolder:WaitForChild("IngredientAdded")
 local IngredientRemovedEvent = shakersFolder:WaitForChild("IngredientRemoved")
 local EnergizingAddedEvent = shakersFolder:WaitForChild("EnergizingAdded")
-local MixingReadyEvent = shakersFolder:WaitForChild("MixingReady")
 
 -- Troves
 local mainTrove = nil
@@ -185,13 +184,6 @@ local function setupEvents()
 		end
 
 		ShakerUI.flashParts(Color3.fromRGB(255, 255, 150))
-	end)
-
-	mainTrove:Connect(MixingReadyEvent.OnClientEvent, function()
-		local contentPart = ShakerInput.getContentPart()
-		if contentPart then
-			ShakerEffects.PlayMixingReadySound(contentPart)
-		end
 	end)
 end
 

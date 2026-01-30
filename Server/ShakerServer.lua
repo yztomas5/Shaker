@@ -46,7 +46,6 @@ local Events = {
 	StopMixing = getOrCreateEvent("StopMixing"),
 	UpdateProgress = getOrCreateEvent("UpdateProgress"),
 	CompleteMixing = getOrCreateEvent("CompleteMixing"),
-	MixingReady = getOrCreateEvent("MixingReady"),
 	ShakerClick = getOrCreateEvent("ShakerClick"),
 	TouchPartClick = getOrCreateEvent("TouchPartClick"),
 	CancelMixing = getOrCreateEvent("CancelMixing"),

@@ -186,12 +186,15 @@ local function startMixing(player)
 	if ActiveShakes[key] then
 		ActiveShakes[key].requiredXp = requiredXp
 		ActiveShakes[key].mixedColor = mixedColor
+		-- Resetear isReady porque ahora hay más XP requerido
+		ActiveShakes[key].isReady = false
 	else
 		ActiveShakes[key] = {
 			player = player,
 			currentXp = 0,
 			requiredXp = requiredXp,
-			mixedColor = mixedColor
+			mixedColor = mixedColor,
+			isReady = false
 		}
 	end
 
@@ -248,7 +251,6 @@ local function addXp(player, amount)
 	-- Marcar como listo pero NO completar automáticamente
 	if data.currentXp >= data.requiredXp then
 		data.isReady = true
-		Events.MixingReady:FireClient(player)
 	end
 end
 
@@ -298,7 +300,6 @@ function ShakerServerController.handleShakerClick(player, plotNumber)
 				-- Marcar como listo pero NO completar automáticamente
 				if data.currentXp >= data.requiredXp then
 					data.isReady = true
-					Events.MixingReady:FireClient(player)
 				end
 				return
 			end

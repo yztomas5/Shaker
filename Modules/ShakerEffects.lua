@@ -20,7 +20,6 @@ local removeIngredientSound = shakerSFXFolder:WaitForChild("Remove")
 local energizingSound = shakerSFXFolder:FindFirstChild("Energizing")
 local midEnergizingSound = shakerSFXFolder:FindFirstChild("MidEnergizing")
 local bigEnergizingSound = shakerSFXFolder:FindFirstChild("BigEnergizing")
-local mixingReadySound = shakerSFXFolder:FindFirstChild("Ready")
 
 -- VFX
 local bubblesVFX = shakerVFXFolder:WaitForChild("Bubbles")
@@ -217,29 +216,6 @@ function ShakerEffects.PlayBigEnergizingSound(contentPart)
 	if bigEnergizingVFX then
 		playEnergizingEffect(contentPart, bigEnergizingVFX)
 	end
-end
-
-------------------------------------------------------------------------
--- SONIDO DE MEZCLA LISTA
-------------------------------------------------------------------------
-
-function ShakerEffects.PlayMixingReadySound(contentPart)
-	if not contentPart or not contentPart:IsA("BasePart") then return end
-
-	local trove = Trove.new()
-
-	local soundToUse = mixingReadySound or addIngredientSound
-	local s = soundToUse:Clone()
-	if not mixingReadySound then
-		s.PlaybackSpeed = 1.2
-	end
-	s.Parent = contentPart
-	trove:Add(s)
-	s:Play()
-
-	trove:Connect(s.Ended, function()
-		trove:Destroy()
-	end)
 end
 
 ------------------------------------------------------------------------
