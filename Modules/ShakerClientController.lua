@@ -65,15 +65,6 @@ local function onTouchPartClick()
 	local plotNumber = ShakerInput.getCurrentPlotNumber()
 	if not plotNumber then return end
 
-	if currentTouchPart then
-		ShakerButton.lock(currentTouchPart)
-		task.delay(ShakerConfig.TOUCH_COOLDOWN, function()
-			if currentTouchPart and ShakerUI.isActive() then
-				ShakerButton.unlock(currentTouchPart)
-			end
-		end)
-	end
-
 	TouchPartClickEvent:FireServer(plotNumber)
 end
 
@@ -87,22 +78,16 @@ local function onRemovePartClick()
 end
 
 ------------------------------------------------------------------------
--- BUTTON STATE
+-- BUTTON STATE (solo RemovePart se bloquea)
 ------------------------------------------------------------------------
 
-local function lockButtons()
-	if currentTouchPart then
-		ShakerButton.lock(currentTouchPart)
-	end
+local function lockRemoveButton()
 	if currentRemovePart then
 		ShakerButton.lock(currentRemovePart)
 	end
 end
 
-local function unlockButtons()
-	if currentTouchPart then
-		ShakerButton.unlock(currentTouchPart)
-	end
+local function unlockRemoveButton()
 	if currentRemovePart then
 		ShakerButton.unlock(currentRemovePart)
 	end
@@ -131,7 +116,7 @@ local function setupEvents()
 
 		ShakerEffects.StartShakeEffects(contentPart, mixedColor)
 		ShakerUI.startEffects(contentPart, ingredientNames, mixedColor)
-		unlockButtons()
+		unlockRemoveButton()
 	end)
 
 	mainTrove:Connect(StopMixingEvent.OnClientEvent, function()
@@ -141,13 +126,13 @@ local function setupEvents()
 			ShakerEffects.PlayRemoveIngredientSound(contentPart)
 		end
 		ShakerUI.stopEffects()
-		lockButtons()
+		lockRemoveButton()
 	end)
 
 	mainTrove:Connect(CompleteMixingEvent.OnClientEvent, function(mixedColor)
 		ShakerEffects.StopShakeEffects()
 		ShakerUI.stopEffects()
-		lockButtons()
+		lockRemoveButton()
 	end)
 
 	mainTrove:Connect(IngredientAddedEvent.OnClientEvent, function(ingredientColor)
@@ -210,15 +195,14 @@ local function loadPlot(plotName)
 
 	plotTrove = mainTrove:Extend()
 
-	-- Setup TouchPart
+	-- Setup TouchPart (nunca se bloquea)
 	local touchPart = shakerFolder:FindFirstChild("TouchPart")
 	if touchPart then
 		currentTouchPart = touchPart
 		ShakerButton.setup(touchPart, plotTrove, onTouchPartClick)
-		ShakerButton.lock(touchPart)
 	end
 
-	-- Setup RemovePart
+	-- Setup RemovePart (bloqueado hasta que haya mezcla activa)
 	local removePart = shakerFolder:FindFirstChild("RemovePart")
 	if removePart then
 		currentRemovePart = removePart
