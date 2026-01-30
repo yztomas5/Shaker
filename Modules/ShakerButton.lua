@@ -1,22 +1,42 @@
 --[[
 	ShakerButton - Módulo para el efecto del TouchPart del shaker
 	Igual que DispenserButton: ClickDetector, highlight, efecto de presionado
-	Usa mouse.Button1Down para clicks (funciona con tools equipadas)
+	Compatible con todas las plataformas (PC, móvil, consola)
 	Usa ClickDetector para hover
+	Usa UserInputService para clicks (funciona con tools equipadas)
 ]]
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local ShakerButton = {}
 
 local PRESS_DURATION = 0.08
 local RELEASE_DURATION = 0.1
 local SCALE_FACTOR = 0.1
+local MAX_ACTIVATION_DISTANCE = 32
 
 local buttonData = {}
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
+
+local function isClickInput(inputType)
+	return inputType == Enum.UserInputType.MouseButton1
+		or inputType == Enum.UserInputType.Touch
+		or inputType == Enum.UserInputType.Gamepad1
+end
+
+local function isWithinDistance(part)
+	local character = player.Character
+	if not character then return false end
+
+	local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart then return false end
+
+	local distance = (humanoidRootPart.Position - part.Position).Magnitude
+	return distance <= MAX_ACTIVATION_DISTANCE
+end
 
 function ShakerButton.setup(touchPart, trove, onClickCallback)
 	if not touchPart or not touchPart:IsA("BasePart") then return end
@@ -66,11 +86,14 @@ function ShakerButton.setup(touchPart, trove, onClickCallback)
 		highlight.Enabled = false
 	end)
 
-	-- Click con mouse.Button1Down (funciona incluso con tools equipadas)
+	-- Click con UserInputService (compatible con PC, móvil y consola)
 	local function handleClick()
 		if data.isPressed or data.isLocked then return end
 
-		-- Verificar que el mouse está sobre esta parte
+		-- Verificar distancia
+		if not isWithinDistance(touchPart) then return end
+
+		-- Verificar que el mouse/touch está sobre esta parte
 		local target = mouse.Target
 		if target ~= touchPart and not (target and target:IsDescendantOf(touchPart)) then
 			return
@@ -105,7 +128,12 @@ function ShakerButton.setup(touchPart, trove, onClickCallback)
 		end
 	end
 
-	trove:Connect(mouse.Button1Down, handleClick)
+	trove:Connect(UserInputService.InputBegan, function(input, gameProcessed)
+		if gameProcessed then return end
+		if isClickInput(input.UserInputType) then
+			handleClick()
+		end
+	end)
 
 	trove:Add(function()
 		buttonData[touchPart] = nil
