@@ -394,9 +394,6 @@ function ShakerServerController.onPlayerAdded(player)
 end
 
 function ShakerServerController.onPlayerRemoving(player)
-	-- Guardar datos primero
-	Data.Save(player, ActiveShakes)
-
 	-- Obtener la plot del jugador antes de limpiar
 	local plotNumber = getPlotNumber(player)
 
@@ -407,12 +404,6 @@ function ShakerServerController.onPlayerRemoving(player)
 	TouchCooldowns[player.UserId] = nil
 	ClickCooldowns[player.UserId] = nil
 	ActiveShakes[player.UserId] = nil
-end
-
-function ShakerServerController.saveAllPlayers()
-	for _, player in ipairs(Players:GetPlayers()) do
-		Data.Save(player, ActiveShakes)
-	end
 end
 
 ------------------------------------------------------------------------

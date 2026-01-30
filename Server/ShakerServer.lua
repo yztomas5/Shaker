@@ -88,19 +88,3 @@ Players.PlayerRemoving:Connect(ShakerServerController.onPlayerRemoving)
 for _, player in ipairs(Players:GetPlayers()) do
 	task.spawn(ShakerServerController.onPlayerAdded, player)
 end
-
-------------------------------------------------------------------------
--- AUTO-SAVE Y BIND TO CLOSE
-------------------------------------------------------------------------
-
-task.spawn(function()
-	while true do
-		task.wait(120)
-		ShakerServerController.saveAllPlayers()
-	end
-end)
-
-game:BindToClose(function()
-	ShakerServerController.saveAllPlayers()
-	task.wait(2)
-end)
