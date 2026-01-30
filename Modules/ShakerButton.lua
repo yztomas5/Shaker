@@ -1,12 +1,12 @@
 --[[
 	ShakerButton - Módulo para el efecto del TouchPart del shaker
-	Igual que DispenserButton: ClickDetector, highlight, efecto de presionado
 	Compatible con todas las plataformas (PC, móvil, consola)
-	Usa ClickDetector para hover
+	Usa RunService para hover detection
 	Usa UserInputService para clicks (funciona con tools equipadas)
 ]]
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
@@ -38,6 +38,12 @@ local function isWithinDistance(part)
 	return distance <= MAX_ACTIVATION_DISTANCE
 end
 
+local function isMouseOverPart(part)
+	local target = mouse.Target
+	if not target then return false end
+	return target == part or target:IsDescendantOf(part)
+end
+
 function ShakerButton.setup(touchPart, trove, onClickCallback)
 	if not touchPart or not touchPart:IsA("BasePart") then return end
 
@@ -47,11 +53,6 @@ function ShakerButton.setup(touchPart, trove, onClickCallback)
 	local squashedSize = Vector3.new(originalSize.X * SCALE_FACTOR, originalSize.Y, originalSize.Z)
 	local sizeOffset = (originalSize.X - squashedSize.X) / 2
 	local squashedCFrame = originalCFrame * CFrame.new(sizeOffset, 0, 0)
-
-	local clickDetector = Instance.new("ClickDetector")
-	clickDetector.MaxActivationDistance = 32
-	clickDetector.Parent = touchPart
-	trove:Add(clickDetector)
 
 	local highlight = Instance.new("Highlight")
 	highlight.Adornee = touchPart
@@ -66,24 +67,28 @@ function ShakerButton.setup(touchPart, trove, onClickCallback)
 	local data = {
 		isPressed = false,
 		isLocked = false,
+		isHovered = false,
 		originalSize = originalSize,
 		originalCFrame = originalCFrame,
 		squashedSize = squashedSize,
 		squashedCFrame = squashedCFrame,
 		touchPart = touchPart,
-		highlight = highlight,
-		clickDetector = clickDetector
+		highlight = highlight
 	}
 
 	buttonData[touchPart] = data
 
-	-- Hover con ClickDetector (funciona siempre)
-	trove:Connect(clickDetector.MouseHoverEnter, function()
-		highlight.Enabled = true
-	end)
+	-- Hover con RunService (independiente de estados)
+	trove:Connect(RunService.RenderStepped, function()
+		local shouldHover = isMouseOverPart(touchPart) and isWithinDistance(touchPart)
 
-	trove:Connect(clickDetector.MouseHoverLeave, function()
-		highlight.Enabled = false
+		if shouldHover and not data.isHovered then
+			data.isHovered = true
+			highlight.Enabled = true
+		elseif not shouldHover and data.isHovered then
+			data.isHovered = false
+			highlight.Enabled = false
+		end
 	end)
 
 	-- Click con UserInputService (compatible con PC, móvil y consola)
@@ -94,10 +99,7 @@ function ShakerButton.setup(touchPart, trove, onClickCallback)
 		if not isWithinDistance(touchPart) then return end
 
 		-- Verificar que el mouse/touch está sobre esta parte
-		local target = mouse.Target
-		if target ~= touchPart and not (target and target:IsDescendantOf(touchPart)) then
-			return
-		end
+		if not isMouseOverPart(touchPart) then return end
 
 		data.isPressed = true
 
@@ -153,10 +155,6 @@ function ShakerButton.lock(touchPart)
 	local data = buttonData[touchPart]
 	if data then
 		data.isLocked = true
-		-- Forzar limpiar highlight al bloquear
-		if data.highlight then
-			data.highlight.Enabled = false
-		end
 	end
 end
 
