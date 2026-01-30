@@ -237,13 +237,18 @@ local function addXp(player, amount)
 	local data = ActiveShakes[key]
 	if not data then return end
 
-	data.currentXp = data.currentXp + amount
+	-- Si ya está listo, no añadir más XP
+	if data.isReady then return end
+
+	data.currentXp = math.min(data.currentXp + amount, data.requiredXp)
 
 	updateBillboard(player, data.currentXp, data.requiredXp, true)
 	Events.UpdateProgress:FireClient(player, data.currentXp, data.requiredXp)
 
+	-- Marcar como listo pero NO completar automáticamente
 	if data.currentXp >= data.requiredXp then
-		completeMixing(player)
+		data.isReady = true
+		Events.MixingReady:FireClient(player)
 	end
 end
 
@@ -275,19 +280,25 @@ function ShakerServerController.handleShakerClick(player, plotNumber)
 			local toolId = Utils.GetToolId(tool)
 			local gear = toolId and Inventory.FindGear(player, tool.Name, toolId)
 			if gear then
+				local data = ActiveShakes[key]
+
+				-- Si ya está listo, no añadir más energizantes
+				if data.isReady then return end
+
 				tool:Destroy()
 				gear:Destroy()
 
-				local data = ActiveShakes[key]
 				local xpToAdd = math.floor(data.requiredXp * percent)
-				data.currentXp = data.currentXp + xpToAdd
+				data.currentXp = math.min(data.currentXp + xpToAdd, data.requiredXp)
 
 				updateBillboard(player, data.currentXp, data.requiredXp, true)
 				Events.UpdateProgress:FireClient(player, data.currentXp, data.requiredXp)
 				Events.EnergizingAdded:FireClient(player, xpToAdd, tool.Name)
 
+				-- Marcar como listo pero NO completar automáticamente
 				if data.currentXp >= data.requiredXp then
-					completeMixing(player)
+					data.isReady = true
+					Events.MixingReady:FireClient(player)
 				end
 				return
 			end
@@ -320,6 +331,12 @@ function ShakerServerController.handleTouchPartClick(player, plotNumber)
 
 	local key = player.UserId
 	if not ActiveShakes[key] then return end
+
+	-- Si la mezcla está lista, completarla con el toque final
+	if ActiveShakes[key].isReady then
+		completeMixing(player)
+		return
+	end
 
 	addXp(player, Config.XP_PER_TOUCH)
 end
