@@ -1,8 +1,11 @@
 --[[
 	ShakerButton - Módulo para el efecto del TouchPart del shaker
 	Igual que DispenserButton: ClickDetector, highlight, efecto de presionado
+	Usa mouse.Button1Down para clicks (funciona con tools equipadas)
+	Usa ClickDetector para hover
 ]]
 
+local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 
 local ShakerButton = {}
@@ -12,6 +15,8 @@ local RELEASE_DURATION = 0.1
 local SCALE_FACTOR = 0.1
 
 local buttonData = {}
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
 
 function ShakerButton.setup(touchPart, trove, onClickCallback)
 	if not touchPart or not touchPart:IsA("BasePart") then return end
@@ -52,6 +57,7 @@ function ShakerButton.setup(touchPart, trove, onClickCallback)
 
 	buttonData[touchPart] = data
 
+	-- Hover con ClickDetector (funciona siempre)
 	trove:Connect(clickDetector.MouseHoverEnter, function()
 		highlight.Enabled = true
 	end)
@@ -60,8 +66,15 @@ function ShakerButton.setup(touchPart, trove, onClickCallback)
 		highlight.Enabled = false
 	end)
 
-	trove:Connect(clickDetector.MouseClick, function()
+	-- Click con mouse.Button1Down (funciona incluso con tools equipadas)
+	local function handleClick()
 		if data.isPressed or data.isLocked then return end
+
+		-- Verificar que el mouse está sobre esta parte
+		local target = mouse.Target
+		if target ~= touchPart and not (target and target:IsDescendantOf(touchPart)) then
+			return
+		end
 
 		data.isPressed = true
 
@@ -90,7 +103,9 @@ function ShakerButton.setup(touchPart, trove, onClickCallback)
 		if onClickCallback then
 			onClickCallback()
 		end
-	end)
+	end
+
+	trove:Connect(mouse.Button1Down, handleClick)
 
 	trove:Add(function()
 		buttonData[touchPart] = nil
