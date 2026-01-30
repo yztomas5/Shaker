@@ -6,6 +6,7 @@
 ]]
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
@@ -20,6 +21,7 @@ local MAX_ACTIVATION_DISTANCE = 32
 local buttonData = {}
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
+local clickSound = ReplicatedStorage.Assets.Sounds.SFX.Shakers.Click
 
 local function isClickInput(inputType)
 	return inputType == Enum.UserInputType.MouseButton1
@@ -102,6 +104,14 @@ function ShakerButton.setup(touchPart, trove, onClickCallback)
 		if not isMouseOverPart(touchPart) then return end
 
 		data.isPressed = true
+
+		-- Reproducir sonido de click
+		local sound = clickSound:Clone()
+		sound.Parent = touchPart
+		sound:Play()
+		sound.Ended:Once(function()
+			sound:Destroy()
+		end)
 
 		local pressInfo = TweenInfo.new(PRESS_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 		local pressEffect = TweenService:Create(touchPart, pressInfo, {
