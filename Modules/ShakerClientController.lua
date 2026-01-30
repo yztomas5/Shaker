@@ -65,6 +65,15 @@ local function onTouchPartClick()
 	local plotNumber = ShakerInput.getCurrentPlotNumber()
 	if not plotNumber then return end
 
+	if currentTouchPart then
+		ShakerButton.lock(currentTouchPart)
+		task.delay(ShakerConfig.TOUCH_COOLDOWN, function()
+			if currentTouchPart and ShakerUI.isActive() then
+				ShakerButton.unlock(currentTouchPart)
+			end
+		end)
+	end
+
 	TouchPartClickEvent:FireServer(plotNumber)
 end
 
@@ -78,16 +87,22 @@ local function onRemovePartClick()
 end
 
 ------------------------------------------------------------------------
--- BUTTON STATE (solo RemovePart se bloquea)
+-- BUTTON STATE
 ------------------------------------------------------------------------
 
-local function lockRemoveButton()
+local function lockButtons()
+	if currentTouchPart then
+		ShakerButton.lock(currentTouchPart)
+	end
 	if currentRemovePart then
 		ShakerButton.lock(currentRemovePart)
 	end
 end
 
-local function unlockRemoveButton()
+local function unlockButtons()
+	if currentTouchPart then
+		ShakerButton.unlock(currentTouchPart)
+	end
 	if currentRemovePart then
 		ShakerButton.unlock(currentRemovePart)
 	end
@@ -116,7 +131,7 @@ local function setupEvents()
 
 		ShakerEffects.StartShakeEffects(contentPart, mixedColor)
 		ShakerUI.startEffects(contentPart, ingredientNames, mixedColor)
-		unlockRemoveButton()
+		unlockButtons()
 	end)
 
 	mainTrove:Connect(StopMixingEvent.OnClientEvent, function()
@@ -126,13 +141,15 @@ local function setupEvents()
 			ShakerEffects.PlayRemoveIngredientSound(contentPart)
 		end
 		ShakerUI.stopEffects()
-		lockRemoveButton()
+		lockButtons()
 	end)
 
 	mainTrove:Connect(CompleteMixingEvent.OnClientEvent, function(mixedColor)
 		ShakerEffects.StopShakeEffects()
 		ShakerUI.stopEffects()
-		lockRemoveButton()
+		lockButtons()
+		-- Limpiar highlight al completar
+		ShakerUI.clearHighlight()
 	end)
 
 	mainTrove:Connect(IngredientAddedEvent.OnClientEvent, function(ingredientColor)
